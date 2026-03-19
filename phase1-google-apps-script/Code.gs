@@ -1,13 +1,15 @@
 // ╔══════════════════════════════════════════════════════════════╗
-//  GMAIL → DRIVE  |  АВТОМАТИЗАЦИЯ НА ДОСТАВЧИЦИ  v4.2
-//  Стартирай: testScript() → resetAndReprocess() → processEmailsAndUpload()
+//  GMAIL → DRIVE  |  АВТОМАТИЗАЦИЯ НА ДОСТАВЧИЦИ  v4.3
+//  Стартирай: testScript() → processEmailsAndUpload() → setupTrigger()
 //
-//  Промени v4.2 (спрямо v4.1):
-//  - TIMESTAMP_FILES: true → всеки файл се запазва с дата-префикс
-//    (2025-01-15_Orbico_price_list.xlsx) така старите версии се пазят
-//  - Дубликат проверката проверява само оригиналното иле (без timestamp)
-//    за да не качва един и същ файл от един и същ имейл два пъти
-//  - _buildFileName(): нова функция за форматиране на имена
+//  Промени v4.3:
+//  - Само Inbox (не Sent, не Spam)
+//  - Блокирани податели (BLOCKED_SENDERS)
+//  - Нови доставчици в MANUAL_MAPPING
+//  - Нови забранени разширения (презентации, аудио)
+//  - Обработка само след 01.01.2025 при първо пускане
+//  - Автоматично запомня датата на последно пускане
+//  - resetLastRunDate() за пълна преобработка
 // ╚══════════════════════════════════════════════════════════════╝
 
 // ============================================================
@@ -22,35 +24,63 @@ var CONFIG = {
     price:   'Цени',
     other:   'Други',
   },
-  MANUAL_MAPPING: {
-    'axxon':     'Axxon',
-    'amperel':   'Amperel',
-    'fortuna':   'Fortuna',
-    'orbico':    'Orbico',
-    'iventas':   'Iventas',
-    'bebolino':  'Bebolino',
-    'buldent':   'Buldent',
-    'remedium':  'Remedium',
-    'argoprima': 'Argoprima',
-    'uvex':      'Uvex',
-    'comsed':    'Comsed',
-  },
-  EXCLUDE_KEYWORDS: ['test', 'draft', 'sample', 'пробен', 'чернова'],
-  EXCLUDE_EXTENSIONS: ['tmp', 'cache', 'log', 'bak', 'exe', 'bat', 'cmd', 'scr', 'vbs', 'js'],
-  IMAGE_EXTENSIONS: ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'svg', 'webp', 'ico', 'tiff', 'tif'],
-  DANGEROUS_MIME: ['application/x-msdownload', 'application/x-executable'],
-  MAX_FILE_SIZE_MB: 50,
-  MAX_EMAIL_AGE_DAYS: 0,
-  MAX_RETRIES: 3,
-  BATCH_SIZE: 20,
-  MAX_FOLDER_NAME_LEN: 40,
-  LOG_TO_SHEET: false,
-  LOG_SHEET_ID: '',
 
-  // Добавя дата-префикс към всеки запазен файл: 2025-01-15_filename.xlsx
-  // true  = старите файлове се ПАЗЯТ, всяка версия получава уникално ime
-  // false = файл се пропуска ако вече съществува (старо поведение)
+  // Домейн (или частта от него) → точно иле на папката в Drive
+  MANUAL_MAPPING: {
+    'axxon':                'Axxon',
+    'amperel':              'Amperel',
+    'fortuna':              'Fortuna',
+    'orbico':               'Orbico',
+    'iventas':              'Iventas',
+    'bebolino':             'Bebolino',
+    'buldent':              'Buldent',
+    'remedium':             'Remedium',
+    'argoprima':            'Argoprima',
+    'uvex':                 'Uvex',
+    'comsed':               'Comsed',
+    'bestwholesalecompany': 'Best Wholesale Company',
+    'giochigiachi':         'Giochi Giachi IT',
+    'ellecosmetique':       'Elle Cosmetique',
+    'yutikanatural':        'Yutika Natural',
+    'irbis':                'Uvex',
+  },
+
+  // Имейл адреси, чиито съобщения се игнорират напълно
+  BLOCKED_SENDERS: [
+    'bsabalans@gmail.com',
+    'balansvarna@gmail.com',
+    'idev7.office@gmail.com',
+  ],
+
+  EXCLUDE_KEYWORDS: ['test', 'draft', 'sample', 'пробен', 'чернова'],
+
+  // Разширения, които изобщо не се качват
+  EXCLUDE_EXTENSIONS: [
+    // Системни / опасни
+    'tmp', 'cache', 'log', 'bak', 'exe', 'bat', 'cmd', 'scr', 'vbs', 'js',
+    // Презентации
+    'pptx', 'ppt', 'pptm', 'ppsx', 'potx', 'potm', 'ppsm', 'ppa', 'ppam', 'odp',
+    // Аудио
+    'mp3', 'aac', 'm4a', 'wav', 'flac', 'wma', 'ogg', 'aiff', 'mid', 'midi',
+  ],
+
+  IMAGE_EXTENSIONS: ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'svg', 'webp', 'ico', 'tiff', 'tif'],
+  DANGEROUS_MIME:   ['application/x-msdownload', 'application/x-executable'],
+
+  MAX_FILE_SIZE_MB:    50,
+  MAX_RETRIES:         3,
+  BATCH_SIZE:          20,
+  MAX_FOLDER_NAME_LEN: 40,
+  LOG_TO_SHEET:        false,
+  LOG_SHEET_ID:        '',
+
+  // true  = всяка версия получава дата-префикс, старите се пазят
+  // false = пропуска файл ако вече съществува
   TIMESTAMP_FILES: true,
+
+  // Обработвай само имейли след тази дата (само при първо пускане)
+  // При следващи пускания скриптът помни последната си дата автоматично
+  INITIAL_START_DATE: '2025/01/01',
 };
 
 // ============================================================
@@ -136,6 +166,9 @@ function _run(mode) {
   var removed = _cleanEmptyFolders();
   if (removed > 0) Logger.log('Изтрити ' + removed + ' празни папки.');
 
+  // FIX v4.3: запази датата на успешно пускане
+  _saveLastRunTimestamp();
+
   _printStats(stats, Date.now() - t0);
   _logToSheet('PROCESS', 'Качени: ' + stats.uploaded + ', Грешки: ' + stats.errors);
 }
@@ -145,6 +178,14 @@ function _processMessage(message, stats) {
 
   var from         = message.getFrom();
   var subject      = message.getSubject();
+
+  // FIX v4.3: пропусни имейли от блокирани адреси
+  if (_isBlockedSender(from)) {
+    Logger.log('  [BLK] Блокиран подател: ' + from);
+    stats.excluded++;
+    return;
+  }
+
   var body         = _safeGetBody(message);
   var htmlBody     = _safeGetHtmlBody(message);
   var supplierName = extractSupplierName(body, from, subject);
@@ -427,6 +468,17 @@ function _shouldExclude(subject) {
   return false;
 }
 
+// FIX v4.3: проверява дали подателят е в блокирания списък
+function _isBlockedSender(emailAddress) {
+  // Извлича чистия имейл адрес от "Иван Иванов <ivan@example.com>"
+  var match = emailAddress.match(/<(.+)>/);
+  var email = (match ? match[1] : emailAddress).toLowerCase().trim();
+  for (var i = 0; i < CONFIG.BLOCKED_SENDERS.length; i++) {
+    if (email === CONFIG.BLOCKED_SENDERS[i].toLowerCase()) return true;
+  }
+  return false;
+}
+
 function _fileExists(folder, fileName) { try { return folder.getFilesByName(fileName).hasNext(); } catch(e) { return false; } }
 
 function _threadHasLabel(thread, labelName) {
@@ -444,13 +496,53 @@ function _requireLabel(name) {
 function _getOrCreateLabel(name) { return GmailApp.getUserLabelByName(name) || GmailApp.createLabel(name); }
 function _safeGetBody(message)   { try { return message.getPlainTextBody() || ''; } catch(e) { return ''; } }
 
-// FIX v4.1: quoted label за кирилска съвместимост
+// FIX v4.3: само Inbox, само след начална/последна дата, кирилски лейбъли
 function _getThreads(mode) {
+  // Вземи датата от която да търсим
+  var afterDate = _getStartDate();
+
+  // Форматирай за Gmail search: after:YYYY/MM/DD
+  var d    = new Date(afterDate);
+  var yyyy = d.getFullYear();
+  var mm   = ('0' + (d.getMonth() + 1)).slice(-2);
+  var dd   = ('0' + d.getDate()).slice(-2);
+  var afterStr = 'after:' + yyyy + '/' + mm + '/' + dd;
+
+  // Само Inbox (in:inbox) + лейбъл Доставчик + след дата
+  // -label:"Обработени" при mode='new'
+  var query = 'in:inbox label:"' + CONFIG.SUPPLIER_LABEL + '" ' + afterStr;
   if (mode === 'new') {
-    var query = 'label:"' + CONFIG.SUPPLIER_LABEL + '" -label:"' + CONFIG.PROCESSED_LABEL + '"';
-    return GmailApp.search(query);
+    query += ' -label:"' + CONFIG.PROCESSED_LABEL + '"';
   }
-  return _requireLabel(CONFIG.SUPPLIER_LABEL).getThreads();
+
+  Logger.log('  Gmail query: ' + query);
+  return GmailApp.search(query);
+}
+
+// Връща Date от който да започне обработката:
+// - Ако има записана дата от предишно пускане → ползва нея
+// - Ако не → ползва INITIAL_START_DATE от CONFIG
+function _getStartDate() {
+  var props = PropertiesService.getScriptProperties();
+  var saved = props.getProperty('LAST_RUN_TIMESTAMP');
+  if (saved) {
+    Logger.log('  Последно пускане: ' + new Date(parseInt(saved)).toLocaleString('bg-BG'));
+    return new Date(parseInt(saved));
+  }
+  Logger.log('  Първо пускане — старт от: ' + CONFIG.INITIAL_START_DATE);
+  return new Date(CONFIG.INITIAL_START_DATE);
+}
+
+// Записва текущото време като "последно пускане"
+function _saveLastRunTimestamp() {
+  PropertiesService.getScriptProperties().setProperty('LAST_RUN_TIMESTAMP', Date.now().toString());
+  Logger.log('  Записана дата на пускане: ' + new Date().toLocaleString('bg-BG'));
+}
+
+// Нулира записаната дата (при нужда от пълна преобработка)
+function resetLastRunDate() {
+  PropertiesService.getScriptProperties().deleteProperty('LAST_RUN_TIMESTAMP');
+  Logger.log('Датата на последно пускане е нулирана. Следващото пускане ще започне от ' + CONFIG.INITIAL_START_DATE);
 }
 
 function getOrCreateFolder(folderName) {
@@ -811,5 +903,6 @@ function showMenu() {
   Logger.log('    archiveOldFiles()             — архивирай >180 дни');
   Logger.log('    syncToSheet()                 — експортирай в Sheet');
   Logger.log('    removeTrigger()               — спри автоматизацията');
+  Logger.log('    resetLastRunDate()            — нулирай дата (пълна преобработка)');
   Logger.log(''); Logger.log('════════════════════════════════════════════════════════════'); Logger.log('');
 }

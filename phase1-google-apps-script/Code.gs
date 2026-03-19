@@ -1,298 +1,766 @@
-/**
- * Amazon FBM Automation — Фаза 1
- * Организация на документи от доставчици
- * 
- * Инсталация:
- * 1. Отвори script.google.com
- * 2. Създай нов проект "Amazon FBM - Phase 1"
- * 3. Постави целия код тук
- * 4. Попълни CONFIG обекта с твоите стойности
- * 5. Изпълни setupTrigger() ВЕДНЪЖ за да настроиш автоматичното изпълнение
- * 6. Дай необходимите permissions при поискване
- */
+// ╔══════════════════════════════════════════════════════════════╗
+//  GMAIL → DRIVE  |  АВТОМАТИЗАЦИЯ НА ДОСТАВЧИЦИ  v4.1
+//  Стартирай: testScript() → resetAndReprocess() → processEmailsAndUpload()
+//
+//  Промени v4.1 (спрямо v4.0):
+//  - Добавена setupTrigger() + removeTrigger()
+//  - Поправен _getThreads('new') за кирилски лейбъли  
+//  - Поправен getFileType() — добавен .ods
+//  - Поправена images статистика в _processMessage()
+//  - Поправен archiveOldFiles() → getDateCreated()
+//  - cleanupDuplicates() → пази по-новия файл (last-created wins)
+//  - resetAndReprocess() → DRY_RUN защита по подразбиране
+//  - _fromSignature() → добавени кирилски форми (ЕООД, ООД, АД, ЕАД)
+// ╚══════════════════════════════════════════════════════════════╝
 
 // ============================================================
-// КОНФИГУРАЦИЯ — попълни преди първо стартиране
+//  КОНФИГУРАЦИЯ  —  редактирай само тук
 // ============================================================
-const CONFIG = {
-  // Gmail лейбъл за имейли от доставчици
-  GMAIL_LABEL: 'доставчици',
-
-  // Името на root папката в Google Drive
-  DRIVE_ROOT_FOLDER: 'Цени доставчици',
-
-  // Google Sheet ID за логове (от URL-а на Sheet-а)
-  // Пример: https://docs.google.com/spreadsheets/d/SHEET_ID_HERE/edit
-  LOG_SHEET_ID: 'ПОПЪЛНИ_SHEET_ID_ТУК',
-
-  // Разширения за ценови листи
-  PRICE_LIST_EXTENSIONS: ['.xlsx', '.xls', '.csv'],
-
-  // Разширения за фактури
-  INVOICE_EXTENSIONS: ['.pdf'],
-
-  // Подпапки в папката на всеки доставчик
-  PRICE_SUBFOLDER: 'Ценови листи',
-  INVOICE_SUBFOLDER: 'Фактури',
-
-  // Брой дни назад за сканиране при първо изпълнение
-  INITIAL_SCAN_DAYS: 30
+var CONFIG = {
+  SUPPLIER_LABEL:  'Доставчик',
+  PROCESSED_LABEL: 'Обработени',
+  PARENT_FOLDER_ID: '100T4KgyVIXhKlJczQv7DR9CJlV27DbUx',
+  SUBFOLDERS: {
+    invoice: 'Фактури',
+    price:   'Цени',
+    other:   'Други',
+  },
+  MANUAL_MAPPING: {
+    'buldent':  'Buldent Pharmaceutical',
+    'ampercl':  'Amperel Ltd',
+  },
+  EXCLUDE_KEYWORDS: ['test', 'draft', 'sample', 'пробен', 'чернова'],
+  EXCLUDE_EXTENSIONS: ['tmp', 'cache', 'log', 'bak', 'exe', 'bat', 'cmd', 'scr', 'vbs', 'js'],
+  IMAGE_EXTENSIONS: ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'svg', 'webp', 'ico', 'tiff', 'tif'],
+  DANGEROUS_MIME: ['application/x-msdownload', 'application/x-executable'],
+  MAX_FILE_SIZE_MB: 50,
+  MAX_EMAIL_AGE_DAYS: 0,
+  MAX_RETRIES: 3,
+  BATCH_SIZE: 20,
+  MAX_FOLDER_NAME_LEN: 40,
+  LOG_TO_SHEET: false,
+  LOG_SHEET_ID: '',
 };
 
 // ============================================================
-// ГЛАВНА ФУНКЦИЯ — изпълнява се от trigger
+//  ТИП НА ФАЙЛ
 // ============================================================
-function processSupplierEmails() {
-  const startTime = new Date();
-  Logger.log('=== Стартиране на обработка: ' + startTime.toISOString() + ' ===');
+function getFileType(fileName) {
+  var f   = fileName.toLowerCase();
+  var ext = f.split('.').pop();
 
-  try {
-    // Вземи или създай root папката в Drive
-    const rootFolder = getOrCreateFolder(CONFIG.DRIVE_ROOT_FOLDER, DriveApp.getRootFolder());
+  // FIX v4.1: добавен .ods (OpenDocument Spreadsheet)
+  if (ext === 'xlsx' || ext === 'xls' || ext === 'xlsm' || ext === 'csv' || ext === 'ods') return 'price';
 
-    // Намери Gmail лейбъла
-    const label = GmailApp.getUserLabelByName(CONFIG.GMAIL_LABEL);
-    if (!label) {
-      throw new Error('Gmail лейбъл "' + CONFIG.GMAIL_LABEL + '" не е намерен! Моля, създай го в Gmail.');
-    }
-
-    // Вземи непрочетените теми (threads)
-    const threads = label.getThreads();
-    Logger.log('Намерени теми: ' + threads.length);
-
-    let processedCount = 0;
-    let errorCount = 0;
-
-    for (const thread of threads) {
-      const messages = thread.getMessages();
-
-      for (const message of messages) {
-        // Пропусни вече прочетените съобщения
-        if (!message.isUnread()) continue;
-
-        try {
-          processMessage(message, rootFolder);
-          message.markRead();
-          processedCount++;
-        } catch (msgError) {
-          Logger.log('ГРЕШКА при обработка на съобщение: ' + msgError.message);
-          errorCount++;
-          logToSheet('Phase1', 'ERROR', 'Грешка при ' + message.getSubject() + ': ' + msgError.message, 0, 'FAILED');
-        }
-      }
-    }
-
-    const summary = `Обработени: ${processedCount}, Грешки: ${errorCount}`;
-    Logger.log('=== Завършено: ' + summary + ' ===');
-    logToSheet('Phase1', 'RUN_COMPLETE', summary, processedCount, 'SUCCESS');
-
-  } catch (error) {
-    Logger.log('КРИТИЧНА ГРЕШКА: ' + error.message);
-    logToSheet('Phase1', 'CRITICAL_ERROR', error.message, 0, 'FAILED');
+  if (ext === 'pdf') {
+    if (/price|прайс|цена|цени|quote|quotation|offer|оферт|каталог|catalog|tariff/.test(f)) return 'price';
+    return 'invoice';
   }
+
+  if (ext === 'doc' || ext === 'docx') {
+    if (/price|прайс|цена|цени|quote|offer|оферт|каталог|catalog/.test(f)) return 'price';
+    return 'invoice';
+  }
+
+  if (/invoice|фактур|сч[её]т|bill|receipt/.test(f)) return 'invoice';
+  if (/price|прайс|цена|цени|quote|quotation|offer|оферт|каталог|catalog|tariff/.test(f)) return 'price';
+
+  return 'other';
 }
 
 // ============================================================
-// ОБРАБОТКА НА ЕДНО СЪОБЩЕНИЕ
+//  ГЛАВНИ ФУНКЦИИ
 // ============================================================
-function processMessage(message, rootFolder) {
-  const subject = message.getSubject();
-  const sender = message.getFrom();
-  const date = message.getDate();
+function processEmailsAndUpload() { _run('all'); }
+function processUnreadEmails()    { _run('new'); }
 
-  Logger.log('Обработвам: "' + subject + '" от ' + sender);
+// ============================================================
+//  ЯДРО
+// ============================================================
+function _run(mode) {
+  var t0    = Date.now();
+  var stats = _emptyStats();
 
-  // Извличане на прикачени файлове
-  const attachments = message.getAttachments();
-  if (attachments.length === 0) {
-    Logger.log('Няма прикачени файлове — пропускам.');
+  try {
+    var processedLabel = _getOrCreateLabel(CONFIG.PROCESSED_LABEL);
+    var threads        = _getThreads(mode);
+
+    Logger.log('');
+    Logger.log('════════════════════════════════════════════════════════════');
+    Logger.log('  СТАРТ  |  режим: ' + (mode === 'all' ? 'всички' : 'нови') + '  |  нишки: ' + threads.length);
+    Logger.log('════════════════════════════════════════════════════════════');
+    stats.threads = threads.length;
+
+    for (var i = 0; i < threads.length; i++) {
+      var thread  = threads[i];
+      var subject = thread.getFirstMessageSubject();
+
+      if (mode === 'all' && _threadHasLabel(thread, CONFIG.PROCESSED_LABEL)) {
+        Logger.log('[' + (i+1) + '/' + threads.length + '] Пропусната (обработена): ' + subject);
+        continue;
+      }
+
+      if (_shouldExclude(subject)) {
+        Logger.log('[' + (i+1) + '/' + threads.length + '] Отфилтрирана: ' + subject);
+        stats.excluded++;
+        thread.addLabel(processedLabel);
+        continue;
+      }
+
+      Logger.log('');
+      Logger.log('[' + (i+1) + '/' + threads.length + '] ' + subject);
+
+      var messages = thread.getMessages();
+      for (var j = 0; j < messages.length; j++) {
+        _processMessage(messages[j], stats);
+      }
+      thread.addLabel(processedLabel);
+    }
+
+  } catch (err) {
+    Logger.log('КРИТИЧНА ГРЕШКА: ' + err.message + '\n' + err.stack);
+    stats.fatalErrors++;
+  }
+
+  var removed = _cleanEmptyFolders();
+  if (removed > 0) Logger.log('Изтрити ' + removed + ' празни папки.');
+
+  _printStats(stats, Date.now() - t0);
+  _logToSheet('PROCESS', 'Качени: ' + stats.uploaded + ', Грешки: ' + stats.errors);
+}
+
+function _processMessage(message, stats) {
+  stats.emails++;
+
+  var from         = message.getFrom();
+  var subject      = message.getSubject();
+  var body         = _safeGetBody(message);
+  var htmlBody     = _safeGetHtmlBody(message);
+  var supplierName = extractSupplierName(body, from, subject);
+  var attachments  = message.getAttachments();
+  var sheetLinks   = _extractSheetLinks(htmlBody || body);
+
+  if (attachments.length === 0 && sheetLinks.length === 0) return;
+
+  var hasRealFiles = false;
+  for (var k = 0; k < attachments.length; k++) {
+    var att  = attachments[k];
+    var name = att.getName();
+    var mime = att.getContentType();
+    if (!_isImage(name, mime) && _isSafe(name, mime).ok && !_isExcludedExt(name)) {
+      hasRealFiles = true;
+      break;
+    }
+  }
+  if (sheetLinks.length > 0) hasRealFiles = true;
+
+  // FIX v4.1: images статистиката брои всеки attachment правилно
+  if (!hasRealFiles) {
+    Logger.log('  [---] ' + supplierName + ' — само изображения, папка не се създава');
+    stats.images += attachments.length;
     return;
   }
 
-  // Извличане на името на доставчика от подателя
-  const supplierName = extractSupplierName(sender, subject);
-  Logger.log('Доставчик: ' + supplierName);
+  var folder = getOrCreateFolder(supplierName);
+  Logger.log('  Доставчик: ' + supplierName + ' | файлове: ' + attachments.length + ' | sheet линкове: ' + sheetLinks.length);
 
-  // Създаване на структурата в Drive
-  const supplierFolder = getOrCreateFolder(supplierName, rootFolder);
-  const priceFolder = getOrCreateFolder(CONFIG.PRICE_SUBFOLDER, supplierFolder);
-  const invoiceFolder = getOrCreateFolder(CONFIG.INVOICE_SUBFOLDER, supplierFolder);
+  for (var k = 0; k < attachments.length; k++) {
+    var result = _processAttachment(attachments[k], message, folder);
+    if (stats[result] !== undefined) { stats[result]++; } else { stats[result] = 1; }
+    if (result === 'uploaded') stats.byType[getFileType(attachments[k].getName())]++;
+  }
 
-  let savedFiles = 0;
+  for (var s = 0; s < sheetLinks.length; s++) {
+    var sr = _processSheetLink(sheetLinks[s], folder);
+    if (stats[sr] !== undefined) { stats[sr]++; } else { stats[sr] = 1; }
+    if (sr === 'uploaded') stats.byType['price']++;
+  }
+}
 
-  for (const attachment of attachments) {
-    const fileName = attachment.getName().toLowerCase();
-    const originalName = attachment.getName();
-
-    // Добавяме timestamp към името на файла за уникалност
-    const timestamp = Utilities.formatDate(date, 'Europe/Sofia', 'yyyy-MM-dd_HHmm');
-    const newFileName = timestamp + '_' + originalName;
-
-    let targetFolder = null;
-
-    if (CONFIG.PRICE_LIST_EXTENSIONS.some(ext => fileName.endsWith(ext))) {
-      targetFolder = priceFolder;
-      Logger.log('  → Ценова листа: ' + originalName);
-    } else if (CONFIG.INVOICE_EXTENSIONS.some(ext => fileName.endsWith(ext))) {
-      targetFolder = invoiceFolder;
-      Logger.log('  → Фактура: ' + originalName);
-    } else {
-      Logger.log('  → Пропускам (неизвестен тип): ' + originalName);
-      continue;
+function _extractSheetLinks(body) {
+  if (!body) return [];
+  var links = [];
+  var seen  = {};
+  var patterns = [
+    /https:\/\/docs\.google\.com\/spreadsheets\/d\/([a-zA-Z0-9_\-]+)/g,
+    /https:\/\/drive\.google\.com\/file\/d\/([a-zA-Z0-9_\-]+)/g,
+    /https:\/\/drive\.google\.com\/open\?id=([a-zA-Z0-9_\-]+)/g,
+  ];
+  for (var p = 0; p < patterns.length; p++) {
+    var re = new RegExp(patterns[p].source, 'g');
+    var match;
+    while ((match = re.exec(body)) !== null) {
+      var id = match[1];
+      if (!seen[id]) { seen[id] = true; links.push(id); }
     }
-
-    // Проверка за дублиране — ако файлът вече съществува, пропускаме
-    if (fileExistsInFolder(newFileName, targetFolder)) {
-      Logger.log('  → Вече съществува, пропускам: ' + newFileName);
-      continue;
-    }
-
-    // Запазване на файла
-    targetFolder.createFile(attachment.copyBlob().setName(newFileName));
-    savedFiles++;
-    Logger.log('  → Запазен: ' + newFileName);
   }
-
-  logToSheet('Phase1', 'PROCESS_EMAIL',
-    `Доставчик: ${supplierName} | Тема: ${subject} | Файлове: ${savedFiles}`,
-    savedFiles, 'SUCCESS');
+  return links;
 }
 
-// ============================================================
-// ПОМОЩНИ ФУНКЦИИ
-// ============================================================
-
-/**
- * Извлича чисто наименование на доставчика от имейл адреса или темата
- */
-function extractSupplierName(sender, subject) {
-  // Опит 1: Вземи display name от "Иван Иванов <ivan@company.com>"
-  const nameMatch = sender.match(/^([^<]+)</);
-  if (nameMatch) {
-    return nameMatch[1].trim().replace(/[\/\\:*?"<>|]/g, '_');
-  }
-
-  // Опит 2: Вземи домейна от имейл адреса
-  const emailMatch = sender.match(/<(.+)>/);
-  if (emailMatch) {
-    const domain = emailMatch[1].split('@')[1];
-    return domain.split('.')[0]; // company от company.com
-  }
-
-  // Fallback: Използвай темата, изчистена
-  return subject.replace(/[\/\\:*?"<>|]/g, '_').substring(0, 50);
-}
-
-/**
- * Вземи съществуваща папка или създай нова
- */
-function getOrCreateFolder(name, parentFolder) {
-  const folders = parentFolder.getFoldersByName(name);
-  if (folders.hasNext()) {
-    return folders.next();
-  }
-  Logger.log('Създавам папка: ' + name);
-  return parentFolder.createFolder(name);
-}
-
-/**
- * Проверява дали файл с дадено ime вече съществува в папката
- */
-function fileExistsInFolder(fileName, folder) {
-  const files = folder.getFilesByName(fileName);
-  return files.hasNext();
-}
-
-/**
- * Записва лог в Google Sheet
- */
-function logToSheet(module, operation, details, affectedRows, status) {
+function _processSheetLink(fileId, supplierFolder) {
   try {
-    if (!CONFIG.LOG_SHEET_ID || CONFIG.LOG_SHEET_ID === 'ПОПЪЛНИ_SHEET_ID_ТУК') {
-      Logger.log('[LOG] ' + module + ' | ' + operation + ' | ' + details);
-      return;
+    var file      = DriveApp.getFileById(fileId);
+    var name      = file.getName();
+    var subFolder = getOrCreateSubFolder(supplierFolder, CONFIG.SUBFOLDERS['price']);
+    if (_fileExists(subFolder, name)) { Logger.log('    [dup] Sheet: ' + name); return 'duplicates'; }
+    file.makeCopy(name, subFolder);
+    Logger.log('    [ OK] [Цени/Sheet] ' + name);
+    return 'uploaded';
+  } catch (err) {
+    Logger.log('    [---] Sheet без достъп: ' + fileId + ' (' + err.message + ')');
+    return 'skipped';
+  }
+}
+
+function _safeGetHtmlBody(message) { try { return message.getBody() || ''; } catch(e) { return ''; } }
+
+function _processAttachment(att, message, supplierFolder) {
+  var fileName = att.getName();
+  var mimeType = att.getContentType();
+
+  if (_isImage(fileName, mimeType)) { Logger.log('    [img] ' + fileName); return 'images'; }
+
+  var safe = _isSafe(fileName, mimeType);
+  if (!safe.ok) { Logger.log('    [BLK] ' + fileName + ' (' + safe.reason + ')'); return 'blocked'; }
+
+  if (_isExcludedExt(fileName)) { Logger.log('    [ext] ' + fileName); return 'skipped'; }
+
+  if (CONFIG.MAX_FILE_SIZE_MB > 0) {
+    var sizeMB = att.getSize() / (1024 * 1024);
+    if (sizeMB > CONFIG.MAX_FILE_SIZE_MB) { Logger.log('    [big] ' + fileName + ' (' + sizeMB.toFixed(1) + ' MB)'); return 'skipped'; }
+  }
+
+  if (CONFIG.MAX_EMAIL_AGE_DAYS > 0) {
+    var days = (Date.now() - message.getDate().getTime()) / 86400000;
+    if (days > CONFIG.MAX_EMAIL_AGE_DAYS) { Logger.log('    [old] ' + fileName); return 'skipped'; }
+  }
+
+  try {
+    var fileType  = getFileType(fileName);
+    var subFolder = getOrCreateSubFolder(supplierFolder, CONFIG.SUBFOLDERS[fileType]);
+    if (_fileExists(subFolder, fileName)) { Logger.log('    [dup] ' + fileName); return 'duplicates'; }
+    _uploadWithRetry(att, subFolder);
+    Logger.log('    [ OK] [' + CONFIG.SUBFOLDERS[fileType] + '] ' + fileName);
+    return 'uploaded';
+  } catch (err) {
+    Logger.log('    [ERR] ' + fileName + ' — ' + err.message);
+    return 'errors';
+  }
+}
+
+function _uploadWithRetry(att, folder) {
+  for (var attempt = 1; attempt <= CONFIG.MAX_RETRIES; attempt++) {
+    try { folder.createFile(att); return; }
+    catch (err) {
+      if (attempt === CONFIG.MAX_RETRIES) throw err;
+      Logger.log('    Опит ' + attempt + ' неуспешен, повтарям...');
+      Utilities.sleep(1500 * attempt);
     }
-
-    const ss = SpreadsheetApp.openById(CONFIG.LOG_SHEET_ID);
-    let sheet = ss.getSheetByName('Log');
-
-    if (!sheet) {
-      sheet = ss.insertSheet('Log');
-      // Хедъри
-      sheet.getRange(1, 1, 1, 6).setValues([
-        ['Timestamp', 'Module', 'Operation', 'Details', 'Affected Rows', 'Status']
-      ]);
-      sheet.getRange(1, 1, 1, 6).setFontWeight('bold');
-    }
-
-    sheet.appendRow([
-      new Date().toISOString(),
-      module,
-      operation,
-      details,
-      affectedRows,
-      status
-    ]);
-  } catch (e) {
-    Logger.log('Грешка при логване: ' + e.message);
   }
 }
 
 // ============================================================
-// SETUP — изпълни само ВЕДНЪЖ при инсталация
+//  РАЗПОЗНАВАНЕ НА ДОСТАВЧИК
 // ============================================================
+function extractSupplierName(body, emailAddress, subject) {
+  return _fromManualMap(emailAddress) || _fromSignature(body) || _fromBody(body) || _fromSubject(subject) || _fromDomain(emailAddress);
+}
 
-/**
- * Настройва time-based trigger за ежедневно изпълнение
- * Изпълни тази функция ВЕДНЪЖ ръчно!
- */
+function _fromManualMap(emailAddress) {
+  var domain = _parseDomain(emailAddress);
+  var keys   = Object.keys(CONFIG.MANUAL_MAPPING);
+  for (var i = 0; i < keys.length; i++) {
+    if (domain.indexOf(keys[i]) !== -1) return CONFIG.MANUAL_MAPPING[keys[i]];
+  }
+  return null;
+}
+
+function _fromSignature(body) {
+  if (!body) return null;
+  var lines  = body.split('\n');
+  var sigIdx = -1;
+  for (var i = 0; i < lines.length; i++) {
+    var t = lines[i].trim();
+    if (/^[-—]{2,}$/.test(t) || /\b(Regards|Best|С уважение|Поздрави|Manager|Director|CEO|Sales)\b/i.test(t)) {
+      sigIdx = i; break;
+    }
+  }
+  if (sigIdx === -1) return null;
+  var sig = lines.slice(sigIdx, sigIdx + 15).join(' ');
+  // FIX v4.1: добавени ЕООД, ООД, АД, ЕАД (кирилица)
+  var patterns = [
+    /([A-ZА-Я][a-zA-Zа-яА-Я0-9\s&\-\.]{2,35}(?:Ltd\.?|Limited|Inc\.?|Corp\.?|Group|Company|GmbH|EOOD|OOD|ЕООД|ООД|АД|ЕАД))/i,
+    /([A-ZА-Я][a-zA-Zа-яА-Я0-9\s&\-\.]{3,30})\s*(?:\||—|–)\s*(?:Tel|Email|www)/i,
+  ];
+  for (var p = 0; p < patterns.length; p++) {
+    var m = sig.match(patterns[p]);
+    if (m && m[1]) { var name = cleanSupplierName(m[1]); if (name.length >= 3) return name; }
+  }
+  return null;
+}
+
+function _fromBody(body) {
+  if (!body) return null;
+  var patterns = [
+    /\b([A-ZА-Я][a-zA-Zа-яА-Я0-9\s&\-\.]{2,35}(?:Ltd\.?|Limited|Inc\.?|Corp\.?|Group|Company|GmbH|EOOD|OOD|ЕООД|ООД|АД|ЕАД))\b/i,
+    /(?:From|От|Company|Компания|Фирма)[:\s]+([A-ZА-Я][a-zA-Zа-яА-Я0-9\s&\-\.]{2,35})/i,
+  ];
+  for (var p = 0; p < patterns.length; p++) {
+    var m = body.match(patterns[p]);
+    if (m && m[1]) { var name = cleanSupplierName(m[1]); if (name.length >= 3) return name; }
+  }
+  return null;
+}
+
+function _fromSubject(subject) {
+  if (!subject) return null;
+  var clean = subject.replace(/^(Re:|Fwd:|RE:|FWD:)\s*/gi, '').trim();
+  if (clean.indexOf(' - ') !== -1) {
+    var name = cleanSupplierName(clean.split(' - ')[0]);
+    if (name.length >= 3) return name;
+  }
+  return null;
+}
+
+function _fromDomain(emailAddress) {
+  var domain     = _parseDomain(emailAddress);
+  var domainName = domain.split('.')[0];
+  var name       = cleanSupplierName(domainName);
+  // FIX v4.1: fallback ако cleanSupplierName върне празно
+  return (name && name.length >= 2) ? name : 'Unknown Supplier';
+}
+
+function _parseDomain(emailAddress) {
+  var match = emailAddress.match(/<(.+)>/);
+  var email = match ? match[1] : emailAddress;
+  return ((email.split('@')[1]) || email).toLowerCase();
+}
+
+// ============================================================
+//  ПОМОЩНИ ФУНКЦИИ
+// ============================================================
+function cleanSupplierName(name) {
+  if (!name) return '';
+  // FIX v4.1: включени кирилски символи в regex
+  name = name.replace(/[^\w\s\-&.а-яА-ЯёЁ]/g, ' ').trim().replace(/\s+/g, ' ').replace(/\.+$/, '');
+  name = name.split(' ').filter(function(w) { return w.length > 0; })
+    .map(function(w) { return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase(); })
+    .join(' ');
+  if (name.length > CONFIG.MAX_FOLDER_NAME_LEN) {
+    name = name.split(' ').slice(0, 3).join(' ').substring(0, CONFIG.MAX_FOLDER_NAME_LEN);
+  }
+  return name;
+}
+
+function _isImage(fileName, mimeType) {
+  var ext = fileName.split('.').pop().toLowerCase();
+  return CONFIG.IMAGE_EXTENSIONS.indexOf(ext) !== -1 || mimeType.indexOf('image/') === 0;
+}
+
+function _isExcludedExt(fileName) {
+  var ext = fileName.split('.').pop().toLowerCase();
+  return CONFIG.EXCLUDE_EXTENSIONS.indexOf(ext) !== -1;
+}
+
+function _isSafe(fileName, mimeType) {
+  var ext = fileName.split('.').pop().toLowerCase();
+  if (CONFIG.EXCLUDE_EXTENSIONS.indexOf(ext) !== -1) return { ok: false, reason: 'опасно разширение' };
+  for (var i = 0; i < CONFIG.DANGEROUS_MIME.length; i++) {
+    if (mimeType.indexOf(CONFIG.DANGEROUS_MIME[i]) !== -1) return { ok: false, reason: 'опасен MIME' };
+  }
+  return { ok: true };
+}
+
+function _shouldExclude(subject) {
+  var s = (subject || '').toLowerCase();
+  for (var i = 0; i < CONFIG.EXCLUDE_KEYWORDS.length; i++) {
+    if (s.indexOf(CONFIG.EXCLUDE_KEYWORDS[i]) !== -1) return true;
+  }
+  return false;
+}
+
+function _fileExists(folder, fileName) { try { return folder.getFilesByName(fileName).hasNext(); } catch(e) { return false; } }
+
+function _threadHasLabel(thread, labelName) {
+  var labels = thread.getLabels();
+  for (var i = 0; i < labels.length; i++) { if (labels[i].getName() === labelName) return true; }
+  return false;
+}
+
+function _requireLabel(name) {
+  var l = GmailApp.getUserLabelByName(name);
+  if (!l) throw new Error('Лейбълът "' + name + '" не съществува!');
+  return l;
+}
+
+function _getOrCreateLabel(name) { return GmailApp.getUserLabelByName(name) || GmailApp.createLabel(name); }
+function _safeGetBody(message)   { try { return message.getPlainTextBody() || ''; } catch(e) { return ''; } }
+
+// FIX v4.1: quoted label за кирилска съвместимост
+function _getThreads(mode) {
+  if (mode === 'new') {
+    var query = 'label:"' + CONFIG.SUPPLIER_LABEL + '" -label:"' + CONFIG.PROCESSED_LABEL + '"';
+    return GmailApp.search(query);
+  }
+  return _requireLabel(CONFIG.SUPPLIER_LABEL).getThreads();
+}
+
+function getOrCreateFolder(folderName) {
+  var parent = DriveApp.getFolderById(CONFIG.PARENT_FOLDER_ID);
+  var it     = parent.getFoldersByName(folderName);
+  if (it.hasNext()) return it.next();
+  Logger.log('    Нова папка: ' + folderName);
+  return parent.createFolder(folderName);
+}
+
+function getOrCreateSubFolder(parent, name) {
+  var it = parent.getFoldersByName(name);
+  return it.hasNext() ? it.next() : parent.createFolder(name);
+}
+
+// ============================================================
+//  СТАТИСТИКА
+// ============================================================
+function _emptyStats() {
+  return { threads: 0, emails: 0, uploaded: 0, duplicates: 0, skipped: 0,
+           images: 0, blocked: 0, errors: 0, fatalErrors: 0, excluded: 0,
+           byType: { invoice: 0, price: 0, other: 0 } };
+}
+
+function _printStats(stats, durationMs) {
+  var sep = '════════════════════════════════════════════════════════════';
+  Logger.log(''); Logger.log(sep);
+  Logger.log('  ЗАВЪРШЕНО за ' + (durationMs / 1000).toFixed(1) + 's'); Logger.log(sep);
+  Logger.log('  Нишки:         ' + stats.threads);
+  Logger.log('  Имейли:        ' + stats.emails);
+  Logger.log('  Качени:        ' + stats.uploaded + '  (фактури: ' + stats.byType.invoice + ', цени: ' + stats.byType.price + ', др: ' + stats.byType.other + ')');
+  Logger.log('  Дубликати:     ' + stats.duplicates);
+  Logger.log('  Пропуснати:    ' + stats.skipped);
+  Logger.log('  Изображения:   ' + stats.images);
+  Logger.log('  Блокирани:     ' + stats.blocked);
+  Logger.log('  Отфилтрирани:  ' + stats.excluded);
+  Logger.log('  Грешки:        ' + (stats.errors + stats.fatalErrors));
+  Logger.log(sep); Logger.log('');
+}
+
+function _logToSheet(action, details) {
+  if (!CONFIG.LOG_TO_SHEET || !CONFIG.LOG_SHEET_ID) return;
+  try {
+    var sheet = SpreadsheetApp.openById(CONFIG.LOG_SHEET_ID).getActiveSheet();
+    sheet.appendRow([new Date(), action, details, Session.getActiveUser().getEmail()]);
+  } catch(err) { Logger.log('Логването в Sheet неуспешно: ' + err.message); }
+}
+
+// ============================================================
+//  TRIGGERS  (НОВО в v4.1)
+// ============================================================
 function setupTrigger() {
-  // Изтрий стари triggers ако има
-  const triggers = ScriptApp.getProjectTriggers();
-  for (const trigger of triggers) {
-    if (trigger.getHandlerFunction() === 'processSupplierEmails') {
-      ScriptApp.deleteTrigger(trigger);
+  var triggers = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === 'processUnreadEmails') {
+      ScriptApp.deleteTrigger(triggers[i]);
+      Logger.log('Изтрит стар trigger.');
     }
   }
-
-  // Създай нов trigger — всеки ден в 08:00
-  ScriptApp.newTrigger('processSupplierEmails')
-    .timeBased()
-    .everyDays(1)
-    .atHour(8)
-    .create();
-
-  Logger.log('✅ Trigger настроен! Скриптът ще се изпълнява всеки ден в 08:00.');
-  Logger.log('Моля, провери в: Extensions → Apps Script → Triggers');
+  ScriptApp.newTrigger('processUnreadEmails')
+    .timeBased().everyDays(1).atHour(8).inTimezone('Europe/Sofia').create();
+  Logger.log('✅ Trigger настроен! processUnreadEmails() — всеки ден в 08:00 EET.');
+  Logger.log('   Провери: Extensions → Apps Script → Triggers');
 }
 
-/**
- * Тестова функция — изпълни ръчно за да провериш работата
- */
-function testRun() {
-  Logger.log('=== ТЕСТОВО ИЗПЪЛНЕНИЕ ===');
-  Logger.log('CONFIG: ' + JSON.stringify(CONFIG));
+function removeTrigger() {
+  var triggers = ScriptApp.getProjectTriggers();
+  var count = 0;
+  for (var i = 0; i < triggers.length; i++) { ScriptApp.deleteTrigger(triggers[i]); count++; }
+  Logger.log('Изтрити ' + count + ' trigger(s).');
+}
 
-  // Проверка на Drive
-  try {
-    const rootFolder = getOrCreateFolder(CONFIG.DRIVE_ROOT_FOLDER, DriveApp.getRootFolder());
-    Logger.log('✅ Drive папка намерена/създадена: ' + rootFolder.getName());
-  } catch (e) {
-    Logger.log('❌ Drive грешка: ' + e.message);
+// ============================================================
+//  РЕСЕТ  (FIX v4.1: DRY_RUN по подразбиране)
+// ============================================================
+function resetAndReprocess() {
+  var DRY_RUN = true; // ← СМЕНИ НА false ЗА РЕАЛНО ИЗТРИВАНЕ
+
+  Logger.log(''); Logger.log('=== ' + (DRY_RUN ? '[DRY RUN] ' : '') + 'ПЪЛЕН РЕСЕТ ==='); Logger.log('');
+  if (DRY_RUN) {
+    Logger.log('⚠️  DRY RUN — нищо няма да бъде изтрито! Смени DRY_RUN = false за реално изтриване.');
+    Logger.log('');
   }
 
-  // Проверка на Gmail лейбъл
-  try {
-    const label = GmailApp.getUserLabelByName(CONFIG.GMAIL_LABEL);
-    if (label) {
-      const threads = label.getThreads();
-      Logger.log('✅ Gmail лейбъл намерен. Теми: ' + threads.length);
-    } else {
-      Logger.log('❌ Gmail лейбъл "' + CONFIG.GMAIL_LABEL + '" НЕ е намерен!');
+  var processed = GmailApp.getUserLabelByName(CONFIG.PROCESSED_LABEL);
+  if (processed) {
+    var threads = processed.getThreads();
+    Logger.log((DRY_RUN ? '[DRY] ' : '') + 'Нишки за нулиране: ' + threads.length);
+    if (!DRY_RUN) {
+      for (var i = 0; i < threads.length; i++) threads[i].removeLabel(processed);
+      Logger.log('OK — лейбълът премахнат');
     }
-  } catch (e) {
-    Logger.log('❌ Gmail грешка: ' + e.message);
+  } else {
+    Logger.log('Лейбълът "' + CONFIG.PROCESSED_LABEL + '" не съществува — OK');
   }
 
-  Logger.log('=== Края на теста ===');
+  try {
+    var parent = DriveApp.getFolderById(CONFIG.PARENT_FOLDER_ID);
+    var subs = parent.getFolders(); var count = 0;
+    while (subs.hasNext()) {
+      var f = subs.next();
+      Logger.log((DRY_RUN ? '[DRY] Ще изтрие: ' : '  Изтрита: ') + f.getName());
+      if (!DRY_RUN) f.setTrashed(true);
+      count++;
+    }
+    Logger.log('OK — ' + (DRY_RUN ? 'Ще изтрие ' : 'Изтрити ') + count + ' папки');
+  } catch(err) { Logger.log('Грешка при Drive: ' + err.message); }
+
+  Logger.log('');
+  if (DRY_RUN) Logger.log('Смени DRY_RUN = false и стартирай отново.');
+  else Logger.log('Ресетът е завършен. Стартирай processEmailsAndUpload()');
+  Logger.log('');
+}
+
+// ============================================================
+//  ТЕСТ
+// ============================================================
+function testScript() {
+  Logger.log(''); Logger.log('=== ТЕСТ РЕЖИМ (без качване) ==='); Logger.log('');
+  var label = GmailApp.getUserLabelByName(CONFIG.SUPPLIER_LABEL);
+  if (!label) { Logger.log('ГРЕШКА: Лейбълът "' + CONFIG.SUPPLIER_LABEL + '" не съществува!'); return; }
+  var threads = label.getThreads(0, 5);
+  if (threads.length === 0) { Logger.log('Няма имейли с лейбъла!'); return; }
+  Logger.log('Преглед на първите ' + threads.length + ' нишки:'); Logger.log('');
+  for (var i = 0; i < threads.length; i++) {
+    var thread    = threads[i];
+    var messages  = thread.getMessages();
+    var excluded  = _shouldExclude(thread.getFirstMessageSubject());
+    var processed = _threadHasLabel(thread, CONFIG.PROCESSED_LABEL);
+    Logger.log((excluded ? '[SKIP] ' : processed ? '[DONE] ' : '[ OK ] ') + thread.getFirstMessageSubject());
+    Logger.log('  Съобщения: ' + messages.length);
+    for (var j = 0; j < messages.length; j++) {
+      var message  = messages[j];
+      var from     = message.getFrom();
+      var subject  = message.getSubject();
+      var body     = _safeGetBody(message);
+      var htmlBody = _safeGetHtmlBody(message);
+      var supplier = extractSupplierName(body, from, subject);
+      var atts     = message.getAttachments();
+      var sheets   = _extractSheetLinks(htmlBody || body);
+      Logger.log('  [msg ' + (j+1) + '] От: ' + from);
+      Logger.log('           Доставчик: ' + supplier);
+      if (atts.length > 0) {
+        Logger.log('           Файлове (' + atts.length + '):');
+        for (var k = 0; k < atts.length; k++) {
+          var att    = atts[k];
+          var name   = att.getName();
+          var mime   = att.getContentType();
+          var type   = getFileType(name);
+          var img    = _isImage(name, mime);
+          var safe   = _isSafe(name, mime);
+          var sizeMB = (att.getSize() / (1024 * 1024)).toFixed(2);
+          var dest   = img ? 'изображение' : (!safe.ok ? 'БЛОКИРАН' : CONFIG.SUBFOLDERS[type]);
+          Logger.log('             ' + name + '  →  ' + dest + '  (' + sizeMB + ' MB)');
+        }
+      }
+      if (sheets.length > 0) {
+        Logger.log('           Google Sheet линкове (' + sheets.length + '):');
+        for (var s = 0; s < sheets.length; s++) Logger.log('             ' + sheets[s] + '  →  Цени');
+      }
+    }
+    Logger.log('');
+  }
+}
+
+// ============================================================
+//  ДАШБОРД  (FIX v4.1: показва trigger статус)
+// ============================================================
+function showDashboard() {
+  Logger.log(''); Logger.log('════════════════════════════════════════════════════════════');
+  Logger.log('  ДАШБОРД'); Logger.log('════════════════════════════════════════════════════════════');
+  var supplierLabel  = GmailApp.getUserLabelByName(CONFIG.SUPPLIER_LABEL);
+  var processedLabel = GmailApp.getUserLabelByName(CONFIG.PROCESSED_LABEL);
+  if (!supplierLabel) { Logger.log('ГРЕШКА: Лейбълът "Доставчик" не съществува!'); return; }
+  var total = supplierLabel.getThreads().length;
+  var done  = processedLabel ? processedLabel.getThreads().length : 0;
+  Logger.log(''); Logger.log('  ИМЕЙЛИ');
+  Logger.log('    Общо:       ' + total);
+  Logger.log('    Обработени: ' + done);
+  Logger.log('    Чакащи:     ' + (total - done));
+  var triggers = ScriptApp.getProjectTriggers();
+  Logger.log(''); Logger.log('  TRIGGERS (' + triggers.length + ')');
+  for (var i = 0; i < triggers.length; i++) Logger.log('    ' + triggers[i].getHandlerFunction() + ' — ' + triggers[i].getEventType());
+  if (triggers.length === 0) Logger.log('    ⚠️  Няма активни triggers! Стартирай setupTrigger().');
+  try {
+    var parent = DriveApp.getFolderById(CONFIG.PARENT_FOLDER_ID);
+    var stats  = _driveStats(parent);
+    Logger.log(''); Logger.log('  DRIVE');
+    Logger.log('    Доставчици: ' + stats.suppliers);
+    Logger.log('    Файлове:    ' + stats.files + '  (фактури: ' + stats.invoices + ', цени: ' + stats.prices + ', др: ' + stats.other + ')');
+    Logger.log('    Размер:     ' + (stats.bytes / (1024 * 1024)).toFixed(1) + ' MB');
+  } catch(err) { Logger.log('  Drive: ' + err.message); }
+  Logger.log(''); Logger.log('════════════════════════════════════════════════════════════'); Logger.log('');
+}
+
+function _driveStats(parent) {
+  var s = { suppliers: 0, files: 0, invoices: 0, prices: 0, other: 0, bytes: 0 };
+  var supplierFolders = parent.getFolders();
+  while (supplierFolders.hasNext()) {
+    var sup = supplierFolders.next(); s.suppliers++;
+    var subFolders = sup.getFolders();
+    while (subFolders.hasNext()) {
+      var sub = subFolders.next(); var files = sub.getFiles();
+      while (files.hasNext()) {
+        var f = files.next(); var ft = getFileType(f.getName());
+        s.files++; s.bytes += f.getSize();
+        if (ft === 'invoice') s.invoices++; else if (ft === 'price') s.prices++; else s.other++;
+      }
+    }
+    var rootFiles = sup.getFiles();
+    while (rootFiles.hasNext()) { var rf = rootFiles.next(); s.files++; s.bytes += rf.getSize(); }
+  }
+  return s;
+}
+
+// ============================================================
+//  ПОЧИСТВАНЕ НА ПРАЗНИ ПАПКИ
+// ============================================================
+function cleanEmptyFolders() {
+  Logger.log(''); Logger.log('=== ПОЧИСТВАНЕ НА ПРАЗНИ ПАПКИ ===');
+  var removed = _cleanEmptyFolders();
+  Logger.log('Изтрити ' + removed + ' празни папки.'); Logger.log('');
+}
+
+function _cleanEmptyFolders() {
+  var parent = DriveApp.getFolderById(CONFIG.PARENT_FOLDER_ID); var removed = 0;
+  var supplierIt = parent.getFolders();
+  while (supplierIt.hasNext()) {
+    var supplierFolder = supplierIt.next();
+    var subIt = supplierFolder.getFolders();
+    while (subIt.hasNext()) {
+      var sub = subIt.next();
+      if (!sub.getFiles().hasNext() && !sub.getFolders().hasNext()) {
+        Logger.log('  Изтрита празна подпапка: ' + supplierFolder.getName() + '/' + sub.getName());
+        sub.setTrashed(true); removed++;
+      }
+    }
+    if (!supplierFolder.getFiles().hasNext() && !supplierFolder.getFolders().hasNext()) {
+      Logger.log('  Изтрита празна папка: ' + supplierFolder.getName());
+      supplierFolder.setTrashed(true); removed++;
+    }
+  }
+  return removed;
+}
+
+// ============================================================
+//  ДУБЛИКАТИ  (FIX v4.1: пази по-новия файл)
+// ============================================================
+function cleanupDuplicates() {
+  Logger.log(''); Logger.log('=== ПОЧИСТВАНЕ НА ДУБЛИКАТИ (пази по-новия) ==='); Logger.log('');
+  var parent = DriveApp.getFolderById(CONFIG.PARENT_FOLDER_ID);
+  var total  = _dedup(parent);
+  Logger.log(''); Logger.log('Изтрити ' + total + ' дубликата'); Logger.log('');
+}
+
+function _dedup(folder) {
+  var total = 0;
+  var subs  = folder.getFolders();
+  while (subs.hasNext()) total += _dedup(subs.next());
+  var fileMap = {}; var files = folder.getFiles();
+  while (files.hasNext()) {
+    var f = files.next(); var n = f.getName();
+    if (!fileMap[n]) fileMap[n] = [];
+    fileMap[n].push(f);
+  }
+  var names = Object.keys(fileMap);
+  for (var i = 0; i < names.length; i++) {
+    var group = fileMap[names[i]];
+    if (group.length <= 1) continue;
+    // Сортирай: по-нов първи
+    group.sort(function(a, b) { return b.getDateCreated().getTime() - a.getDateCreated().getTime(); });
+    for (var j = 1; j < group.length; j++) {
+      Logger.log('  Изтрит по-стар дубликат: ' + group[j].getName() + ' (в "' + folder.getName() + '")');
+      group[j].setTrashed(true); total++;
+    }
+  }
+  return total;
+}
+
+// ============================================================
+//  АРХИВИРАНЕ  (FIX v4.1: getDateCreated())
+// ============================================================
+function archiveOldFiles() {
+  var DAYS = 180;
+  Logger.log(''); Logger.log('=== АРХИВИРАНЕ (>' + DAYS + ' дни от създаване) ==='); Logger.log('');
+  var parent    = DriveApp.getFolderById(CONFIG.PARENT_FOLDER_ID);
+  var yearName  = 'ARCHIVE_' + new Date().getFullYear();
+  var archiveIt = parent.getFoldersByName(yearName);
+  var archive   = archiveIt.hasNext() ? archiveIt.next() : parent.createFolder(yearName);
+  var threshold = Date.now() - DAYS * 86400000;
+  var count     = 0;
+  function walk(folder) {
+    var files = folder.getFiles();
+    while (files.hasNext()) {
+      var f = files.next();
+      if (f.getDateCreated().getTime() < threshold) {
+        archive.addFile(f); folder.removeFile(f);
+        Logger.log('  Архивиран: ' + f.getName() + ' (' + f.getDateCreated().toLocaleDateString('bg-BG') + ')');
+        count++;
+      }
+    }
+    var subs = folder.getFolders();
+    while (subs.hasNext()) walk(subs.next());
+  }
+  walk(parent);
+  Logger.log(''); Logger.log('Архивирани ' + count + ' файла в ' + yearName); Logger.log('');
+}
+
+// ============================================================
+//  СИНХРОНИЗИРАНЕ В SHEET  (FIX v4.1: getDateCreated + freeze)
+// ============================================================
+function syncToSheet() {
+  Logger.log(''); Logger.log('=== СИНХРОНИЗИРАНЕ В GOOGLE SHEET ==='); Logger.log('');
+  var parent = DriveApp.getFolderById(CONFIG.PARENT_FOLDER_ID);
+  var rows   = [['Доставчик', 'Подпапка', 'Файл', 'Тип', 'Размер (MB)', 'Дата създаден']];
+  function walk(folder, supplier, subfolder) {
+    var subs = folder.getFolders();
+    while (subs.hasNext()) { var sub = subs.next(); walk(sub, supplier || sub.getName(), sub.getName()); }
+    var files = folder.getFiles();
+    while (files.hasNext()) {
+      var f = files.next();
+      rows.push([supplier || folder.getName(), subfolder || '—', f.getName(), getFileType(f.getName()),
+        (f.getSize() / (1024 * 1024)).toFixed(2), f.getDateCreated().toLocaleDateString('bg-BG')]);
+    }
+  }
+  walk(parent, null, null);
+  var ss;
+  try { var existing = DriveApp.getFilesByName('Supplier Sync'); ss = existing.hasNext() ? SpreadsheetApp.open(existing.next()) : SpreadsheetApp.create('Supplier Sync'); }
+  catch(e) { ss = SpreadsheetApp.create('Supplier Sync'); }
+  var sheet = ss.getActiveSheet();
+  sheet.clearContents();
+  sheet.getRange(1, 1, rows.length, rows[0].length).setValues(rows);
+  sheet.autoResizeColumns(1, rows[0].length);
+  sheet.setFrozenRows(1);
+  Logger.log('Синхронизирани ' + (rows.length - 1) + ' записа');
+  Logger.log('Sheet: ' + ss.getUrl()); Logger.log('');
+}
+
+// ============================================================
+//  МЕНЮ
+// ============================================================
+function showMenu() {
+  Logger.log(''); Logger.log('════════════════════════════════════════════════════════════');
+  Logger.log('  GMAIL → DRIVE  v4.1  |  ФУНКЦИИ');
+  Logger.log('════════════════════════════════════════════════════════════'); Logger.log('');
+  Logger.log('  СТАРТИРАЙ В ТОЗИ РЕД:');
+  Logger.log('    1. testScript()              — провери без качване');
+  Logger.log('    2. resetAndReprocess()        — нулирай (dry_run=true по подразбиране!)');
+  Logger.log('    3. processEmailsAndUpload()   — обработи всички');
+  Logger.log('    4. setupTrigger()             — настрой автоматизация 08:00 EET'); Logger.log('');
+  Logger.log('  ЕЖЕДНЕВЕН ТРИГЕР:');
+  Logger.log('    processUnreadEmails()         — само нови имейли'); Logger.log('');
+  Logger.log('  УПРАВЛЕНИЕ:');
+  Logger.log('    showDashboard()               — статус (с trigger info)');
+  Logger.log('    cleanEmptyFolders()           — изтрий празни папки');
+  Logger.log('    cleanupDuplicates()           — изтрий по-стари дубликати');
+  Logger.log('    archiveOldFiles()             — архивирай >180 дни');
+  Logger.log('    syncToSheet()                 — експортирай в Sheet');
+  Logger.log('    removeTrigger()               — спри автоматизацията');
+  Logger.log(''); Logger.log('════════════════════════════════════════════════════════════'); Logger.log('');
 }

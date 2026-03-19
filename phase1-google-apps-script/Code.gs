@@ -1,16 +1,13 @@
 // ╔══════════════════════════════════════════════════════════════╗
-//  GMAIL → DRIVE  |  АВТОМАТИЗАЦИЯ НА ДОСТАВЧИЦИ  v4.1
+//  GMAIL → DRIVE  |  АВТОМАТИЗАЦИЯ НА ДОСТАВЧИЦИ  v4.2
 //  Стартирай: testScript() → resetAndReprocess() → processEmailsAndUpload()
 //
-//  Промени v4.1 (спрямо v4.0):
-//  - Добавена setupTrigger() + removeTrigger()
-//  - Поправен _getThreads('new') за кирилски лейбъли  
-//  - Поправен getFileType() — добавен .ods
-//  - Поправена images статистика в _processMessage()
-//  - Поправен archiveOldFiles() → getDateCreated()
-//  - cleanupDuplicates() → пази по-новия файл (last-created wins)
-//  - resetAndReprocess() → DRY_RUN защита по подразбиране
-//  - _fromSignature() → добавени кирилски форми (ЕООД, ООД, АД, ЕАД)
+//  Промени v4.2 (спрямо v4.1):
+//  - TIMESTAMP_FILES: true → всеки файл се запазва с дата-префикс
+//    (2025-01-15_Orbico_price_list.xlsx) така старите версии се пазят
+//  - Дубликат проверката проверява само оригиналното иле (без timestamp)
+//    за да не качва един и същ файл от един и същ имейл два пъти
+//  - _buildFileName(): нова функция за форматиране на имена
 // ╚══════════════════════════════════════════════════════════════╝
 
 // ============================================================
@@ -40,6 +37,11 @@ var CONFIG = {
   MAX_FOLDER_NAME_LEN: 40,
   LOG_TO_SHEET: false,
   LOG_SHEET_ID: '',
+
+  // Добавя дата-префикс към всеки запазен файл: 2025-01-15_filename.xlsx
+  // true  = старите файлове се ПАЗЯТ, всяка версия получава уникално ime
+  // false = файл се пропуска ако вече съществува (старо поведение)
+  TIMESTAMP_FILES: true,
 };
 
 // ============================================================
@@ -236,15 +238,52 @@ function _processAttachment(att, message, supplierFolder) {
   }
 
   try {
-    var fileType  = getFileType(fileName);
-    var subFolder = getOrCreateSubFolder(supplierFolder, CONFIG.SUBFOLDERS[fileType]);
-    if (_fileExists(subFolder, fileName)) { Logger.log('    [dup] ' + fileName); return 'duplicates'; }
-    _uploadWithRetry(att, subFolder);
-    Logger.log('    [ OK] [' + CONFIG.SUBFOLDERS[fileType] + '] ' + fileName);
+    var fileType   = getFileType(fileName);
+    var subFolder  = getOrCreateSubFolder(supplierFolder, CONFIG.SUBFOLDERS[fileType]);
+    var savedName  = _buildFileName(fileName, message.getDate());
+
+    // Дубликат проверка:
+    // При TIMESTAMP_FILES=true  → проверяваме точното ime с timestamp (уникално)
+    // При TIMESTAMP_FILES=false → проверяваме оригиналното ime
+    if (_fileExists(subFolder, savedName)) {
+      Logger.log('    [dup] ' + savedName);
+      return 'duplicates';
+    }
+
+    // Качи с новото (евентуално timestamped) иле
+    var blob = att.copyBlob().setName(savedName);
+    _uploadBlobWithRetry(blob, subFolder);
+    Logger.log('    [ OK] [' + CONFIG.SUBFOLDERS[fileType] + '] ' + savedName);
     return 'uploaded';
   } catch (err) {
     Logger.log('    [ERR] ' + fileName + ' — ' + err.message);
     return 'errors';
+  }
+}
+
+// Изгражда финалното иле за запазване.
+// При TIMESTAMP_FILES=true: "2025-01-15_price_list.xlsx"
+// При TIMESTAMP_FILES=false: "price_list.xlsx" (оригиналното иле)
+function _buildFileName(originalName, emailDate) {
+  if (!CONFIG.TIMESTAMP_FILES) return originalName;
+  var d      = emailDate || new Date();
+  var year   = d.getFullYear();
+  var month  = ('0' + (d.getMonth() + 1)).slice(-2);
+  var day    = ('0' + d.getDate()).slice(-2);
+  var prefix = year + '-' + month + '-' + day + '_';
+  // Не добавяй префикс ако вече започва с дата (2025-...)
+  if (/^\d{4}-\d{2}-\d{2}_/.test(originalName)) return originalName;
+  return prefix + originalName;
+}
+
+function _uploadBlobWithRetry(blob, folder) {
+  for (var attempt = 1; attempt <= CONFIG.MAX_RETRIES; attempt++) {
+    try { folder.createFile(blob); return; }
+    catch (err) {
+      if (attempt === CONFIG.MAX_RETRIES) throw err;
+      Logger.log('    Опит ' + attempt + ' неуспешен, повтарям...');
+      Utilities.sleep(1500 * attempt);
+    }
   }
 }
 
@@ -556,7 +595,8 @@ function testScript() {
           var safe   = _isSafe(name, mime);
           var sizeMB = (att.getSize() / (1024 * 1024)).toFixed(2);
           var dest   = img ? 'изображение' : (!safe.ok ? 'БЛОКИРАН' : CONFIG.SUBFOLDERS[type]);
-          Logger.log('             ' + name + '  →  ' + dest + '  (' + sizeMB + ' MB)');
+          var saved  = (!img && safe.ok) ? _buildFileName(name, message.getDate()) : name;
+          Logger.log('             ' + name + '  →  ' + dest + '  →  ' + saved + '  (' + sizeMB + ' MB)');
         }
       }
       if (sheets.length > 0) {
@@ -746,7 +786,7 @@ function syncToSheet() {
 // ============================================================
 function showMenu() {
   Logger.log(''); Logger.log('════════════════════════════════════════════════════════════');
-  Logger.log('  GMAIL → DRIVE  v4.1  |  ФУНКЦИИ');
+  Logger.log('  GMAIL → DRIVE  v4.2  |  ФУНКЦИИ');
   Logger.log('════════════════════════════════════════════════════════════'); Logger.log('');
   Logger.log('  СТАРТИРАЙ В ТОЗИ РЕД:');
   Logger.log('    1. testScript()              — провери без качване');

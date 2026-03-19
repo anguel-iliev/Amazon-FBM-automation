@@ -1,0 +1,37 @@
+# Secrets — НИКОГА не качвай тези файлове!
+.env
+credentials.json
+service_account.json
+*.key
+*.pem
+token.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+*.pyc
+
+# Логове и изход
+logs/
+output/
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Временни файлове
+*.tmp
+*.bak
+data/*.xlsx
+data/*.pdf

@@ -1,15 +1,14 @@
 // ╔══════════════════════════════════════════════════════════════╗
-//  GMAIL → DRIVE  |  АВТОМАТИЗАЦИЯ НА ДОСТАВЧИЦИ  v4.3
+//  GMAIL → DRIVE  |  АВТОМАТИЗАЦИЯ НА ДОСТАВЧИЦИ  v4.4
 //  Стартирай: testScript() → processEmailsAndUpload() → setupTrigger()
 //
+//  Промени v4.4:
+//  - STRICT MODE: само MANUAL_MAPPING разпознава доставчици
+//    Никога повече папки "Gmail", "Abv", "Agiva" и т.н.
+//  - Непознати доставчици се ПРОПУСКАТ и се логват
+//  - showUnknownSenders() показва кои адреси трябва да добавиш
 //  Промени v4.3:
-//  - Само Inbox (не Sent, не Spam)
-//  - Блокирани податели (BLOCKED_SENDERS)
-//  - Нови доставчици в MANUAL_MAPPING
-//  - Нови забранени разширения (презентации, аудио)
-//  - Обработка само след 01.01.2025 при първо пускане
-//  - Автоматично запомня датата на последно пускане
-//  - resetLastRunDate() за пълна преобработка
+//  - Само Inbox, блокирани податели, дата tracking
 // ╚══════════════════════════════════════════════════════════════╝
 
 // ============================================================
@@ -189,6 +188,14 @@ function _processMessage(message, stats) {
   var body         = _safeGetBody(message);
   var htmlBody     = _safeGetHtmlBody(message);
   var supplierName = extractSupplierName(body, from, subject);
+
+  // FIX v4.4: ако доставчикът не е в MANUAL_MAPPING → пропусни
+  if (!supplierName) {
+    Logger.log('  [---] Непознат доставчик от: ' + from + ' — добави в MANUAL_MAPPING за да се обработва');
+    stats.excluded++;
+    return;
+  }
+
   var attachments  = message.getAttachments();
   var sheetLinks   = _extractSheetLinks(htmlBody || body);
 
@@ -349,10 +356,18 @@ function _uploadWithRetry(att, folder) {
 }
 
 // ============================================================
-//  РАЗПОЗНАВАНЕ НА ДОСТАВЧИК
+//  РАЗПОЗНАВАНЕ НА ДОСТАВЧИК  —  STRICT MODE (v4.4)
+//
+//  Единственият надежден начин за разпознаване е MANUAL_MAPPING.
+//  Ако подателят не е в MANUAL_MAPPING → връща null → имейлът се пропуска.
+//  Така НИКОГА няма да се създадат папки "Gmail", "Abv", "Agiva" и т.н.
+//
+//  За да добавиш нов доставчик: добави ред в MANUAL_MAPPING в CONFIG.
 // ============================================================
 function extractSupplierName(body, emailAddress, subject) {
-  return _fromManualMap(emailAddress) || _fromSignature(body) || _fromBody(body) || _fromSubject(subject) || _fromDomain(emailAddress);
+  return _fromManualMap(emailAddress);
+  // Забележка: _fromSignature, _fromBody, _fromSubject, _fromDomain са
+  // умишлено ИЗКЛЮЧЕНИ — създаваха грешни папки от неразпознати домейни.
 }
 
 function _fromManualMap(emailAddress) {
@@ -362,61 +377,6 @@ function _fromManualMap(emailAddress) {
     if (domain.indexOf(keys[i]) !== -1) return CONFIG.MANUAL_MAPPING[keys[i]];
   }
   return null;
-}
-
-function _fromSignature(body) {
-  if (!body) return null;
-  var lines  = body.split('\n');
-  var sigIdx = -1;
-  for (var i = 0; i < lines.length; i++) {
-    var t = lines[i].trim();
-    if (/^[-—]{2,}$/.test(t) || /\b(Regards|Best|С уважение|Поздрави|Manager|Director|CEO|Sales)\b/i.test(t)) {
-      sigIdx = i; break;
-    }
-  }
-  if (sigIdx === -1) return null;
-  var sig = lines.slice(sigIdx, sigIdx + 15).join(' ');
-  // FIX v4.1: добавени ЕООД, ООД, АД, ЕАД (кирилица)
-  var patterns = [
-    /([A-ZА-Я][a-zA-Zа-яА-Я0-9\s&\-\.]{2,35}(?:Ltd\.?|Limited|Inc\.?|Corp\.?|Group|Company|GmbH|EOOD|OOD|ЕООД|ООД|АД|ЕАД))/i,
-    /([A-ZА-Я][a-zA-Zа-яА-Я0-9\s&\-\.]{3,30})\s*(?:\||—|–)\s*(?:Tel|Email|www)/i,
-  ];
-  for (var p = 0; p < patterns.length; p++) {
-    var m = sig.match(patterns[p]);
-    if (m && m[1]) { var name = cleanSupplierName(m[1]); if (name.length >= 3) return name; }
-  }
-  return null;
-}
-
-function _fromBody(body) {
-  if (!body) return null;
-  var patterns = [
-    /\b([A-ZА-Я][a-zA-Zа-яА-Я0-9\s&\-\.]{2,35}(?:Ltd\.?|Limited|Inc\.?|Corp\.?|Group|Company|GmbH|EOOD|OOD|ЕООД|ООД|АД|ЕАД))\b/i,
-    /(?:From|От|Company|Компания|Фирма)[:\s]+([A-ZА-Я][a-zA-Zа-яА-Я0-9\s&\-\.]{2,35})/i,
-  ];
-  for (var p = 0; p < patterns.length; p++) {
-    var m = body.match(patterns[p]);
-    if (m && m[1]) { var name = cleanSupplierName(m[1]); if (name.length >= 3) return name; }
-  }
-  return null;
-}
-
-function _fromSubject(subject) {
-  if (!subject) return null;
-  var clean = subject.replace(/^(Re:|Fwd:|RE:|FWD:)\s*/gi, '').trim();
-  if (clean.indexOf(' - ') !== -1) {
-    var name = cleanSupplierName(clean.split(' - ')[0]);
-    if (name.length >= 3) return name;
-  }
-  return null;
-}
-
-function _fromDomain(emailAddress) {
-  var domain     = _parseDomain(emailAddress);
-  var domainName = domain.split('.')[0];
-  var name       = cleanSupplierName(domainName);
-  // FIX v4.1: fallback ако cleanSupplierName върне празно
-  return (name && name.length >= 2) ? name : 'Unknown Supplier';
 }
 
 function _parseDomain(emailAddress) {
@@ -883,6 +843,53 @@ function syncToSheet() {
 }
 
 // ============================================================
+//  ПОКАЗВА НЕПОЗНАТИ ИЗПРАЩАЧИ  (v4.4)
+//  Стартирай след processEmailsAndUpload() за да видиш кои
+//  адреси трябва да добавиш в MANUAL_MAPPING
+// ============================================================
+function showUnknownSenders() {
+  Logger.log('');
+  Logger.log('=== НЕПОЗНАТИ ИЗПРАЩАЧИ (не са в MANUAL_MAPPING) ===');
+  Logger.log('');
+
+  var startDate = _getStartDate();
+  var d = startDate;
+  var afterStr = 'after:' + d.getFullYear() + '/' + ('0'+(d.getMonth()+1)).slice(-2) + '/' + ('0'+d.getDate()).slice(-2);
+  var query = 'in:inbox label:"' + CONFIG.SUPPLIER_LABEL + '" ' + afterStr;
+  var threads = GmailApp.search(query);
+
+  var unknown = {};
+
+  for (var i = 0; i < threads.length; i++) {
+    var msgs = threads[i].getMessages();
+    for (var j = 0; j < msgs.length; j++) {
+      var from = msgs[j].getFrom();
+      if (_isBlockedSender(from)) continue;
+      var supplier = _fromManualMap(from);
+      if (!supplier) {
+        var domain = _parseDomain(from);
+        if (!unknown[domain]) unknown[domain] = { from: from, count: 0 };
+        unknown[domain].count++;
+      }
+    }
+  }
+
+  var keys = Object.keys(unknown);
+  if (keys.length === 0) {
+    Logger.log('✅ Всички имейли са разпознати! Няма непознати изпращачи.');
+  } else {
+    Logger.log('Намерени ' + keys.length + ' непознати домейна:');
+    Logger.log('');
+    Logger.log('Добави в MANUAL_MAPPING:');
+    for (var k = 0; k < keys.length; k++) {
+      var info = unknown[keys[k]];
+      Logger.log("  '" + keys[k] + "': 'ИМЕ НА ДОСТАВЧИК',  // " + info.count + ' имейл(а) от ' + info.from);
+    }
+  }
+  Logger.log('');
+}
+
+// ============================================================
 //  МЕНЮ
 // ============================================================
 function showMenu() {
@@ -903,6 +910,6 @@ function showMenu() {
   Logger.log('    archiveOldFiles()             — архивирай >180 дни');
   Logger.log('    syncToSheet()                 — експортирай в Sheet');
   Logger.log('    removeTrigger()               — спри автоматизацията');
-  Logger.log('    resetLastRunDate()            — нулирай дата (пълна преобработка)');
+  Logger.log('    showUnknownSenders()          — виж непознати изпращачи за MANUAL_MAPPING');
   Logger.log(''); Logger.log('════════════════════════════════════════════════════════════'); Logger.log('');
 }

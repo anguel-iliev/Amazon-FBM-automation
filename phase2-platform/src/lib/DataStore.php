@@ -88,7 +88,7 @@ class DataStore {
             'min_margin'      => 0.15,
             'sync_auto'       => true,
             'google_sheet_id' => '',
-            'drive_folder_id' => '100T4KgyVIXhKlJczQv7DR9CJlV27DbUx',
+            'drive_folder_id' => '1Wch88u5tZApf5UOXzeH9AO7TETXGKYnT',
         ];
     }
 

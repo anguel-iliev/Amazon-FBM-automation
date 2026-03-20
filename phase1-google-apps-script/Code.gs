@@ -1,15 +1,14 @@
 // ╔══════════════════════════════════════════════════════════════╗
-//  GMAIL → DRIVE  |  АВТОМАТИЗАЦИЯ НА ДОСТАВЧИЦИ  v4.5
+//  GMAIL → DRIVE  |  АВТОМАТИЗАЦИЯ НА ДОСТАВЧИЦИ  v4.6
 //  Стартирай: testScript() → processEmailsAndUpload() → setupTrigger()
 //
-//  Промени v4.5:
-//  - BATCH MODE: спира при 5 мин и запазва прогреса.
-//    Пусни processEmailsAndUpload() многократно докато не покаже
-//    "Всички нишки обработени". Решава "Exceeded execution time".
-//  Промени v4.4:
-//  - STRICT MODE: само MANUAL_MAPPING разпознава доставчици
-//  Промени v4.3:
-//  - Само Inbox, блокирани податели, дата tracking
+//  Промени v4.6:
+//  - SELF-CHAINING: при достигане на 5-мин лимит скриптът сам
+//    планира продължение след 90 секунди — напълно автоматично.
+//    Пусни processEmailsAndUpload() ВЕДНЪЖ — всичко останало
+//    се случва само.
+//  Промени v4.5: BATCH MODE
+//  Промени v4.4: STRICT MODE (само MANUAL_MAPPING)
 // ╚══════════════════════════════════════════════════════════════╝
 
 // ============================================================
@@ -163,7 +162,7 @@ function _run(mode) {
         props.setProperty(batchKey, nextOffset.toString());
         Logger.log('');
         Logger.log('⏱ Лимит наближава — паузиран при нишка ' + (i+1) + '/' + total);
-        Logger.log('  Пусни processEmailsAndUpload() отново за да продължиш.');
+        _scheduleNextBatch(); // ← автоматично продължение след 90 сек
         _printStats(stats, Date.now() - t0);
         return;
       }
@@ -589,27 +588,58 @@ function _logToSheet(action, details) {
 }
 
 // ============================================================
-//  TRIGGERS  (НОВО в v4.1)
+//  TRIGGERS — SELF-CHAINING (v4.5)
+//
+//  setupTrigger()         — настройва ежедневен trigger в 08:00
+//  processEmailsAndUpload() — при нужда от продължение, сам
+//                             планира нов trigger след 1 минута
 // ============================================================
 function setupTrigger() {
-  var triggers = ScriptApp.getProjectTriggers();
-  for (var i = 0; i < triggers.length; i++) {
-    if (triggers[i].getHandlerFunction() === 'processUnreadEmails') {
-      ScriptApp.deleteTrigger(triggers[i]);
-      Logger.log('Изтрит стар trigger.');
-    }
-  }
+  _clearTriggers(['processUnreadEmails', 'processEmailsAndUpload', '_continueProcessing']);
+
+  // Ежедневен trigger за нови имейли
   ScriptApp.newTrigger('processUnreadEmails')
     .timeBased().everyDays(1).atHour(8).inTimezone('Europe/Sofia').create();
+
   Logger.log('✅ Trigger настроен! processUnreadEmails() — всеки ден в 08:00 EET.');
-  Logger.log('   Провери: Extensions → Apps Script → Triggers');
 }
 
 function removeTrigger() {
+  _clearTriggers(['processUnreadEmails', 'processEmailsAndUpload', '_continueProcessing']);
+  Logger.log('Всички triggers изтрити.');
+}
+
+/** Изтрива triggers по списък с имена на функции */
+function _clearTriggers(funcNames) {
   var triggers = ScriptApp.getProjectTriggers();
-  var count = 0;
-  for (var i = 0; i < triggers.length; i++) { ScriptApp.deleteTrigger(triggers[i]); count++; }
-  Logger.log('Изтрити ' + count + ' trigger(s).');
+  for (var i = 0; i < triggers.length; i++) {
+    if (funcNames.indexOf(triggers[i].getHandlerFunction()) !== -1) {
+      ScriptApp.deleteTrigger(triggers[i]);
+    }
+  }
+}
+
+/**
+ * Планира _continueProcessing() след 1 минута.
+ * Извиква се автоматично когато _run() засече лимита.
+ */
+function _scheduleNextBatch() {
+  // Изтрий стари continuation triggers
+  _clearTriggers(['_continueProcessing']);
+
+  var nextRun = new Date(Date.now() + 90 * 1000); // след 90 секунди
+  ScriptApp.newTrigger('_continueProcessing')
+    .timeBased().at(nextRun).create();
+
+  Logger.log('⏭ Следващ batch планиран за: ' + nextRun.toLocaleTimeString('bg-BG'));
+}
+
+/**
+ * Извиква се автоматично от trigger — продължава незавършената обработка.
+ */
+function _continueProcessing() {
+  Logger.log('▶ Автоматично продължение...');
+  processEmailsAndUpload();
 }
 
 // ============================================================

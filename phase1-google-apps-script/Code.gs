@@ -3,12 +3,13 @@
 //  Стартирай: testScript() → processEmailsAndUpload() → setupTrigger()
 //
 //  Промени v4.5:
-//  - Премахнато in:inbox — имейлите с лейбъл "Доставчик" може да са
-//    архивирани (без INBOX флаг). Лейбълът е достатъчен филтър.
+//  - BATCH MODE: спира при 5 мин и запазва прогреса.
+//    Пусни processEmailsAndUpload() многократно докато не покаже
+//    "Всички нишки обработени". Решава "Exceeded execution time".
 //  Промени v4.4:
 //  - STRICT MODE: само MANUAL_MAPPING разпознава доставчици
 //  Промени v4.3:
-//  - Блокирани податели, дата tracking
+//  - Само Inbox, блокирани податели, дата tracking
 // ╚══════════════════════════════════════════════════════════════╝
 
 // ============================================================
@@ -121,40 +122,69 @@ function processEmailsAndUpload() { _run('all'); }
 function processUnreadEmails()    { _run('new'); }
 
 // ============================================================
-//  ЯДРО
+//  ЯДРО  —  BATCH MODE (v4.5)
+//  Обработва по BATCH_SIZE нишки на пускане.
+//  Запазва прогреса и продължава при следващо пускане.
+//  Пусни processEmailsAndUpload() многократно докато
+//  логът не покаже "Всички нишки обработени".
 // ============================================================
 function _run(mode) {
-  var t0    = Date.now();
-  var stats = _emptyStats();
+  var t0        = Date.now();
+  var stats     = _emptyStats();
+  var MAX_MS    = 5 * 60 * 1000; // 5 мин — с буфер преди лимита от 6 мин
+  var props     = PropertiesService.getScriptProperties();
+  var batchKey  = 'BATCH_OFFSET_' + mode;
 
   try {
     var processedLabel = _getOrCreateLabel(CONFIG.PROCESSED_LABEL);
     var threads        = _getThreads(mode);
 
+    // Вземи offset от предишно прекъснато пускане
+    var offset = parseInt(props.getProperty(batchKey) || '0');
+    if (offset >= threads.length) {
+      // Всичко е обработено — нулирай offset
+      props.deleteProperty(batchKey);
+      offset = 0;
+    }
+
+    var total = threads.length;
     Logger.log('');
     Logger.log('════════════════════════════════════════════════════════════');
-    Logger.log('  СТАРТ  |  режим: ' + (mode === 'all' ? 'всички' : 'нови') + '  |  нишки: ' + threads.length);
+    Logger.log('  СТАРТ  |  ' + (mode === 'all' ? 'всички' : 'нови') +
+               '  |  нишки: ' + total + '  |  старт от: ' + offset);
     Logger.log('════════════════════════════════════════════════════════════');
-    stats.threads = threads.length;
+    stats.threads = total;
 
-    for (var i = 0; i < threads.length; i++) {
+    for (var i = offset; i < threads.length; i++) {
+
+      // Провери дали оставащото време е достатъчно
+      if (Date.now() - t0 > MAX_MS) {
+        var nextOffset = i;
+        props.setProperty(batchKey, nextOffset.toString());
+        Logger.log('');
+        Logger.log('⏱ Лимит наближава — паузиран при нишка ' + (i+1) + '/' + total);
+        Logger.log('  Пусни processEmailsAndUpload() отново за да продължиш.');
+        _printStats(stats, Date.now() - t0);
+        return;
+      }
+
       var thread  = threads[i];
       var subject = thread.getFirstMessageSubject();
 
       if (mode === 'all' && _threadHasLabel(thread, CONFIG.PROCESSED_LABEL)) {
-        Logger.log('[' + (i+1) + '/' + threads.length + '] Пропусната (обработена): ' + subject);
+        Logger.log('[' + (i+1) + '/' + total + '] Пропусната: ' + subject);
         continue;
       }
 
       if (_shouldExclude(subject)) {
-        Logger.log('[' + (i+1) + '/' + threads.length + '] Отфилтрирана: ' + subject);
+        Logger.log('[' + (i+1) + '/' + total + '] Отфилтрирана: ' + subject);
         stats.excluded++;
         thread.addLabel(processedLabel);
         continue;
       }
 
       Logger.log('');
-      Logger.log('[' + (i+1) + '/' + threads.length + '] ' + subject);
+      Logger.log('[' + (i+1) + '/' + total + '] ' + subject);
 
       var messages = thread.getMessages();
       for (var j = 0; j < messages.length; j++) {
@@ -162,6 +192,11 @@ function _run(mode) {
       }
       thread.addLabel(processedLabel);
     }
+
+    // Всичко обработено успешно
+    props.deleteProperty(batchKey);
+    Logger.log('');
+    Logger.log('✅ Всички ' + total + ' нишки обработени!');
 
   } catch (err) {
     Logger.log('КРИТИЧНА ГРЕШКА: ' + err.message + '\n' + err.stack);
@@ -171,9 +206,7 @@ function _run(mode) {
   var removed = _cleanEmptyFolders();
   if (removed > 0) Logger.log('Изтрити ' + removed + ' празни папки.');
 
-  // FIX v4.3: запази датата на успешно пускане
   _saveLastRunTimestamp();
-
   _printStats(stats, Date.now() - t0);
   _logToSheet('PROCESS', 'Качени: ' + stats.uploaded + ', Грешки: ' + stats.errors);
 }

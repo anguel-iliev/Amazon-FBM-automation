@@ -2,6 +2,12 @@
 class Router {
     private array $routes = [];
 
+    // Public routes that never require login
+    private array $publicRoutes = [
+        '/', '/logout',
+        '/register', '/forgot-password', '/reset-password',
+    ];
+
     public function add(string $method, string $path, string $controller, string $action): void {
         $this->routes[] = compact('method', 'path', 'controller', 'action');
     }
@@ -13,15 +19,24 @@ class Router {
 
         foreach ($this->routes as $route) {
             if ($route['method'] !== $method) continue;
-            if ($route['path'] !== $uri) continue;
 
-            // Check auth for protected routes
-            $publicRoutes = ['/', '/logout'];
-            if (!in_array($uri, $publicRoutes) && !str_starts_with($uri, '/api/')) {
-                Auth::requireLogin();
+            // Support path parameters: /register/:token  /reset-password/:token
+            $params = [];
+            if (!$this->matchPath($route['path'], $uri, $params)) continue;
+
+            // Inject path params into $_GET so controllers can use $_GET['token']
+            foreach ($params as $k => $v) {
+                $_GET[$k] = $v;
             }
-            if (str_starts_with($uri, '/api/')) {
-                Auth::requireLogin(true); // JSON response on fail
+
+            // Auth check
+            $isPublic = $this->isPublicRoute($uri);
+            $isApi    = str_starts_with($uri, '/api/');
+
+            if ($isApi) {
+                Auth::requireLogin(true); // JSON 401 on fail
+            } elseif (!$isPublic) {
+                Auth::requireLogin();
             }
 
             $ctrl = new $route['controller']();
@@ -37,5 +52,40 @@ class Router {
         } else {
             View::render('errors/404');
         }
+    }
+
+    /**
+     * Match a route pattern against a URI.
+     * Supports :param segments, e.g. /register/:token
+     * Returns true on match; fills $params array.
+     */
+    private function matchPath(string $pattern, string $uri, array &$params): bool {
+        if ($pattern === $uri) return true;
+
+        $patParts = explode('/', trim($pattern, '/'));
+        $uriParts = explode('/', trim($uri, '/'));
+
+        if (count($patParts) !== count($uriParts)) return false;
+
+        foreach ($patParts as $i => $seg) {
+            if (str_starts_with($seg, ':')) {
+                $params[ltrim($seg, ':')] = $uriParts[$i];
+            } elseif ($seg !== $uriParts[$i]) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Determine if a URI is publicly accessible without login.
+     */
+    private function isPublicRoute(string $uri): bool {
+        foreach ($this->publicRoutes as $pub) {
+            if ($uri === $pub) return true;
+            // prefix match: /register/TOKEN starts with /register
+            if (str_starts_with($uri, rtrim($pub, '/') . '/')) return true;
+        }
+        return false;
     }
 }

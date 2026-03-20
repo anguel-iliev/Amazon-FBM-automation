@@ -194,4 +194,29 @@ class UserStore {
     public static function count(): int {
         return count(array_filter(static::all(), fn($u) => $u['verified']));
     }
+
+    // ── Delete ────────────────────────────────────────────────
+    public static function deleteByEmail(string $email): bool {
+        $users = static::all();
+        $before = count($users);
+        $users  = array_values(array_filter($users, fn($u) => strtolower($u['email']) !== strtolower($email)));
+        if (count($users) === $before) return false;
+        static::save($users);
+        return true;
+    }
+
+    // ── Refresh invite token ──────────────────────────────────
+    public static function refreshInviteToken(string $email): ?string {
+        $users = static::all();
+        foreach ($users as &$u) {
+            if (strtolower($u['email']) !== strtolower($email)) continue;
+            $token = bin2hex(random_bytes(32));
+            $u['verify_token']   = $token;
+            $u['verify_expires'] = time() + TOKEN_EXPIRY;
+            $u['verified']       = false;
+            static::save($users);
+            return $token;
+        }
+        return null;
+    }
 }

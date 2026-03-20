@@ -185,6 +185,7 @@ class AuthController {
             'pageTitle'  => 'Покани потребител',
             'activePage' => 'settings',
             'users'      => UserStore::all(),
+            'smtpOk'     => !empty(SMTP_PASS) && SMTP_PASS !== 'your_16char_app_password_here',
         ]);
     }
 
@@ -213,7 +214,71 @@ class AuthController {
             Session::flash('success', "Покана изпратена до {$email}");
             Logger::info("Invite sent to {$email} by " . Auth::user());
         } else {
-            Session::flash('error', 'Поканата е създадена, но имейлът не беше изпратен. Провери SMTP настройките.');
+            Session::flash('error', 'Поканата е създадена, но имейлът не беше изпратен. Провери SMTP настройките в .env (SMTP_PASS).');
+        }
+
+        View::redirect('/invite');
+    }
+
+    // ── Admin: Delete user ───────────────────────────────────
+    public function deleteUserAction(): void {
+        Auth::requireAdmin();
+        require_once SRC . '/lib/UserStore.php';
+
+        $email = strtolower(trim($_POST['email'] ?? ''));
+
+        // Cannot delete yourself
+        if ($email === strtolower(Auth::user() ?? '')) {
+            Session::flash('error', 'Не можеш да изтриеш собствения си акаунт.');
+            View::redirect('/invite');
+            return;
+        }
+
+        if (UserStore::deleteByEmail($email)) {
+            Session::flash('success', "Потребителят {$email} е изтрит.");
+            Logger::info("User deleted: {$email} by " . Auth::user());
+        } else {
+            Session::flash('error', "Потребителят не е намерен.");
+        }
+
+        View::redirect('/invite');
+    }
+
+    // ── Admin: Resend invite ─────────────────────────────────
+    public function resendInviteAction(): void {
+        Auth::requireAdmin();
+        require_once SRC . '/lib/UserStore.php';
+        require_once SRC . '/lib/Mailer.php';
+
+        $email = strtolower(trim($_POST['email'] ?? ''));
+        $user  = UserStore::findByEmail($email);
+
+        if (!$user) {
+            Session::flash('error', 'Потребителят не е намерен.');
+            View::redirect('/invite');
+            return;
+        }
+
+        if ($user['verified'] ?? false) {
+            Session::flash('error', 'Акаунтът вече е активиран — не е нужна нова покана.');
+            View::redirect('/invite');
+            return;
+        }
+
+        // Refresh token
+        $token = UserStore::refreshInviteToken($email);
+        if (!$token) {
+            Session::flash('error', 'Грешка при обновяване на токена.');
+            View::redirect('/invite');
+            return;
+        }
+
+        $sent = Mailer::sendInvite($email, $token);
+        if ($sent) {
+            Session::flash('success', "Поканата е изпратена повторно до {$email}");
+            Logger::info("Invite resent to {$email} by " . Auth::user());
+        } else {
+            Session::flash('error', 'Имейлът не беше изпратен. Провери SMTP настройките в .env.');
         }
 
         View::redirect('/invite');

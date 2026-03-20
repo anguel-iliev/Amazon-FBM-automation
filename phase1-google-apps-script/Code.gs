@@ -1,14 +1,14 @@
 // ╔══════════════════════════════════════════════════════════════╗
-//  GMAIL → DRIVE  |  АВТОМАТИЗАЦИЯ НА ДОСТАВЧИЦИ  v4.4
+//  GMAIL → DRIVE  |  АВТОМАТИЗАЦИЯ НА ДОСТАВЧИЦИ  v4.5
 //  Стартирай: testScript() → processEmailsAndUpload() → setupTrigger()
 //
+//  Промени v4.5:
+//  - Премахнато in:inbox — имейлите с лейбъл "Доставчик" може да са
+//    архивирани (без INBOX флаг). Лейбълът е достатъчен филтър.
 //  Промени v4.4:
 //  - STRICT MODE: само MANUAL_MAPPING разпознава доставчици
-//    Никога повече папки "Gmail", "Abv", "Agiva" и т.н.
-//  - Непознати доставчици се ПРОПУСКАТ и се логват
-//  - showUnknownSenders() показва кои адреси трябва да добавиш
 //  Промени v4.3:
-//  - Само Inbox, блокирани податели, дата tracking
+//  - Блокирани податели, дата tracking
 // ╚══════════════════════════════════════════════════════════════╝
 
 // ============================================================
@@ -462,21 +462,19 @@ function _requireLabel(name) {
 function _getOrCreateLabel(name) { return GmailApp.getUserLabelByName(name) || GmailApp.createLabel(name); }
 function _safeGetBody(message)   { try { return message.getPlainTextBody() || ''; } catch(e) { return ''; } }
 
-// FIX v4.3: само Inbox, само след начална/последна дата, кирилски лейбъли
+// FIX v4.5: премахнато in:inbox — имейлите с лейбъл "Доставчик" може да са
+// архивирани и да нямат INBOX флаг. Лейбълът е достатъчен филтър.
+// Блокираните адреси (BLOCKED_SENDERS) защитават от нежелани имейли.
 function _getThreads(mode) {
-  // Вземи датата от която да търсим
   var afterDate = _getStartDate();
-
-  // Форматирай за Gmail search: after:YYYY/MM/DD
   var d    = new Date(afterDate);
   var yyyy = d.getFullYear();
   var mm   = ('0' + (d.getMonth() + 1)).slice(-2);
   var dd   = ('0' + d.getDate()).slice(-2);
   var afterStr = 'after:' + yyyy + '/' + mm + '/' + dd;
 
-  // Само Inbox (in:inbox) + лейбъл Доставчик + след дата
-  // -label:"Обработени" при mode='new'
-  var query = 'in:inbox label:"' + CONFIG.SUPPLIER_LABEL + '" ' + afterStr;
+  // Само лейбъл Доставчик + след дата (без in:inbox)
+  var query = 'label:"' + CONFIG.SUPPLIER_LABEL + '" ' + afterStr;
   if (mode === 'new') {
     query += ' -label:"' + CONFIG.PROCESSED_LABEL + '"';
   }

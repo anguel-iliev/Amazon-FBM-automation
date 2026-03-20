@@ -9,13 +9,13 @@ if (file_exists($envFile)) {
     foreach ($lines as $line) {
         if (strpos(trim($line), '#') === 0) continue;
         if (strpos($line, '=') === false) continue;
-        [$key, $val] = explode('=', $line, 2);
+        list($key, $val) = explode('=', $line, 2);
         $_ENV[trim($key)] = trim($val);
     }
 }
 
-function env(string $key, $default = null) {
-    return $_ENV[$key] ?? $default;
+function env($key, $default = null) {
+    return isset($_ENV[$key]) ? $_ENV[$key] : $default;
 }
 
 // ── App ─────────────────────────────────────────────────────
@@ -49,20 +49,19 @@ define('DATA_DIR',  ROOT . '/data');
 define('LOGS_DIR',  DATA_DIR . '/logs');
 define('CACHE_DIR', DATA_DIR . '/cache');
 
-foreach ([DATA_DIR, LOGS_DIR, CACHE_DIR] as $dir) {
+foreach (array(DATA_DIR, LOGS_DIR, CACHE_DIR) as $dir) {
     if (!is_dir($dir)) mkdir($dir, 0755, true);
 }
 
 // ── Autoloader ──────────────────────────────────────────────
-spl_autoload_register(function (string $class) {
-    $map = [
+spl_autoload_register(function ($class) {
+    $map = array(
         'Router'              => SRC . '/lib/Router.php',
         'Session'             => SRC . '/lib/Session.php',
         'Auth'                => SRC . '/lib/Auth.php',
         'UserStore'           => SRC . '/lib/UserStore.php',
         'Mailer'              => SRC . '/lib/Mailer.php',
         'View'                => SRC . '/lib/View.php',
-        'GoogleApi'           => SRC . '/lib/GoogleApi.php',
         'Logger'              => SRC . '/lib/Logger.php',
         'DataStore'           => SRC . '/lib/DataStore.php',
         'AuthController'      => SRC . '/auth/AuthController.php',
@@ -72,7 +71,7 @@ spl_autoload_register(function (string $class) {
         'PricingController'   => SRC . '/modules/pricing/PricingController.php',
         'SettingsController'  => SRC . '/modules/settings/SettingsController.php',
         'ApiController'       => SRC . '/api/ApiController.php',
-    ];
+    );
     if (isset($map[$class])) require_once $map[$class];
 });
 
@@ -85,5 +84,5 @@ if (APP_DEBUG) {
     ini_set('display_errors', '0');
 }
 set_error_handler(function($errno, $errstr, $errfile, $errline) {
-    if (class_exists('Logger')) Logger::error("PHP Error [$errno]: $errstr in $errfile:$errline");
+    if (class_exists('Logger')) Logger::error("PHP Error [{$errno}]: {$errstr} in {$errfile}:{$errline}");
 });

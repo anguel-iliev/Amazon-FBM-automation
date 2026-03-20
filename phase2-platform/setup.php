@@ -48,7 +48,7 @@ if (!file_exists($envFile)) {
 // ─────────────────────────────────────────────────────────────────
 // Helper: read .env into array
 // ─────────────────────────────────────────────────────────────────
-function readEnv(string $file): array {
+function readEnv(string $file{
     $map = [];
     foreach (file($file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $line) {
         if (strpos(trim($line), '#') === 0) { $map[] = $line; continue; }
@@ -62,7 +62,7 @@ function readEnv(string $file): array {
 // ─────────────────────────────────────────────────────────────────
 // Helper: write .env from array
 // ─────────────────────────────────────────────────────────────────
-function writeEnv(string $file, array $map): void {
+function writeEnv(string $file, array $map{
     $lines = [];
     foreach ($map as $k => $v) {
         if (is_int($k)) { $lines[] = $v; } // comments / blank lines

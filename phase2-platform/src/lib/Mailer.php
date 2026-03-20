@@ -1,35 +1,24 @@
 <?php
 /**
  * Mailer — изпраща имейли чрез SMTP (Gmail)
- * Без зависимости — чист PHP с fsockopen/TLS.
- * Работи на всеки Apache хостинг.
  */
 class Mailer {
 
-    /**
-     * Изпраща имейл за потвърждение след покана
-     */
-    public static function sendInvite(string $toEmail, string $token): bool {
+    public static function sendInvite($toEmail, $token) {
         $link    = APP_URL . '/register/' . $token;
         $subject = 'Покана за AMZ Retail платформата';
         $body    = static::inviteTemplate($toEmail, $link);
         return static::send($toEmail, $subject, $body);
     }
 
-    /**
-     * Изпраща имейл за нулиране на парола
-     */
-    public static function sendPasswordReset(string $toEmail, string $token): bool {
+    public static function sendPasswordReset($toEmail, $token) {
         $link    = APP_URL . '/reset-password/' . $token;
         $subject = 'Нулиране на парола — AMZ Retail';
         $body    = static::resetTemplate($toEmail, $link);
         return static::send($toEmail, $subject, $body);
     }
 
-    /**
-     * Основна функция за изпращане
-     */
-    public static function send(string $to, string $subject, string $htmlBody): bool {
+    public static function send($to, $subject, $htmlBody) {
         $host = SMTP_HOST;
         $port = SMTP_PORT;
         $user = SMTP_USER;
@@ -43,31 +32,25 @@ class Mailer {
         }
 
         try {
-            // Connect
             $socket = fsockopen($host, $port, $errno, $errstr, 10);
             if (!$socket) {
                 Logger::error("Mailer: Cannot connect to {$host}:{$port} — {$errstr}");
                 return false;
             }
 
-            static::read($socket); // 220 greeting
+            static::read($socket);
 
-            // EHLO
             static::write($socket, "EHLO amz-retail.tnsoft.eu");
             static::read($socket);
 
-            // STARTTLS
             static::write($socket, "STARTTLS");
             static::read($socket);
 
-            // Enable TLS
             stream_socket_enable_crypto($socket, true, STREAM_CRYPTO_METHOD_TLSv1_2_CLIENT);
 
-            // EHLO again after TLS
             static::write($socket, "EHLO amz-retail.tnsoft.eu");
             static::read($socket);
 
-            // AUTH LOGIN
             static::write($socket, "AUTH LOGIN");
             static::read($socket);
             static::write($socket, base64_encode($user));
@@ -81,19 +64,15 @@ class Mailer {
                 return false;
             }
 
-            // MAIL FROM
             static::write($socket, "MAIL FROM:<{$from}>");
             static::read($socket);
 
-            // RCPT TO
             static::write($socket, "RCPT TO:<{$to}>");
             static::read($socket);
 
-            // DATA
             static::write($socket, "DATA");
             static::read($socket);
 
-            // Build message
             $boundary = md5(uniqid());
             $date     = date('r');
             $msgId    = '<' . time() . '.' . bin2hex(random_bytes(4)) . '@amz-retail.tnsoft.eu>';
@@ -124,17 +103,17 @@ class Mailer {
             Logger::info("Mailer: Sent '{$subject}' to {$to}");
             return true;
 
-        } catch (Throwable $e) {
+        } catch (Exception $e) {
             Logger::error("Mailer exception: " . $e->getMessage());
             return false;
         }
     }
 
-    private static function write($socket, string $cmd): void {
+    private static function write($socket, $cmd) {
         fwrite($socket, $cmd . "\r\n");
     }
 
-    private static function read($socket): string {
+    private static function read($socket) {
         $resp = '';
         while ($line = fgets($socket, 512)) {
             $resp .= $line;
@@ -143,8 +122,7 @@ class Mailer {
         return $resp;
     }
 
-    // ── Email templates ───────────────────────────────────────
-    private static function inviteTemplate(string $email, string $link): string {
+    private static function inviteTemplate($email, $link) {
         return <<<HTML
 <!DOCTYPE html>
 <html lang="bg">
@@ -153,9 +131,7 @@ class Mailer {
   <table width="100%" cellpadding="0" cellspacing="0" style="background:#0D0F14;min-height:100vh">
     <tr><td align="center" style="padding:60px 20px">
       <table width="520" cellpadding="0" cellspacing="0" style="background:#1A1E2A;border:1px solid rgba(255,255,255,0.08);border-radius:8px;overflow:hidden">
-        <tr>
-          <td style="background:#C9A84C;padding:4px 0;font-size:1px">&nbsp;</td>
-        </tr>
+        <tr><td style="background:#C9A84C;padding:4px 0;font-size:1px">&nbsp;</td></tr>
         <tr>
           <td style="padding:40px 48px">
             <p style="font-size:22px;font-weight:700;color:#E8E6E1;margin:0 0 6px">AMZ<span style="color:#C9A84C">Retail</span></p>
@@ -167,7 +143,7 @@ class Mailer {
             </p>
             <p style="margin:0 0 32px">
               <a href="{$link}" style="display:inline-block;background:#C9A84C;color:#0D0F14;text-decoration:none;padding:14px 32px;border-radius:4px;font-weight:700;font-size:14px;letter-spacing:0.05em">
-                Активирай акаунт →
+                Активирай акаунт &rarr;
               </a>
             </p>
             <p style="font-size:12px;color:rgba(232,230,225,0.35);margin:0 0 8px">Или копирай линка:</p>
@@ -188,7 +164,7 @@ class Mailer {
 HTML;
     }
 
-    private static function resetTemplate(string $email, string $link): string {
+    private static function resetTemplate($email, $link) {
         return <<<HTML
 <!DOCTYPE html>
 <html lang="bg">
@@ -208,7 +184,7 @@ HTML;
             </p>
             <p style="margin:0 0 32px">
               <a href="{$link}" style="display:inline-block;background:#C9A84C;color:#0D0F14;text-decoration:none;padding:14px 32px;border-radius:4px;font-weight:700;font-size:14px">
-                Задай нова парола →
+                Задай нова парола &rarr;
               </a>
             </p>
             <p style="font-size:12px;color:rgba(232,230,225,0.3);margin:0">Линкът е валиден 24 часа.</p>

@@ -1,6 +1,6 @@
 <?php
 class SettingsController {
-    public function index(): void {
+    public function index() {
         require_once SRC . '/lib/DataStore.php';
         $settings = DataStore::getSettings();
 
@@ -11,17 +11,15 @@ class SettingsController {
         ]);
     }
 
-    public function save(): void {
+    public function save() {
         require_once SRC . '/lib/DataStore.php';
         $settings = DataStore::getSettings();
 
-        // Google IDs
-        $settings['google_sheet_id']  = trim($_POST['google_sheet_id']  ?? '');
-        $settings['drive_folder_id']  = trim($_POST['drive_folder_id']  ?? '');
-        $settings['min_margin']       = (float)($_POST['min_margin'] ?? 0.15);
-        $settings['sync_auto']        = isset($_POST['sync_auto']);
+        $settings['google_sheet_id'] = trim($_POST['google_sheet_id'] ?? '');
+        $settings['drive_folder_id'] = trim($_POST['drive_folder_id'] ?? '');
+        $settings['min_margin']      = (float)($_POST['min_margin'] ?? 0.15);
+        $settings['sync_auto']       = isset($_POST['sync_auto']);
 
-        // Marketplace settings
         $codes = ['DE','FR','IT','ES','NL','PL','SE'];
         foreach ($codes as $code) {
             $settings['marketplaces'][$code] = [
@@ -34,8 +32,6 @@ class SettingsController {
         }
 
         DataStore::saveSettings($settings);
-
-        // Update .env if Google IDs changed
         Logger::info("Settings saved by " . Auth::user());
         Session::flash('success', 'Настройките са запазени.');
         View::redirect('/settings');

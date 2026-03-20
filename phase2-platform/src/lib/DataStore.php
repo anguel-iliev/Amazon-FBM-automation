@@ -1,14 +1,10 @@
 <?php
 /**
  * DataStore — файлово базирано хранилище (JSON)
- * Без нужда от MySQL/PostgreSQL.
- * Данните за продуктите идват от Google Sheets чрез Python.
- * Локално се пазят: sync logs, settings, cache.
  */
 class DataStore {
 
-    // ── Products (кешират се от Google Sheets) ────────────────
-    public static function getProducts(array $filters = []): array {
+    public static function getProducts($filters = []) {
         $file = CACHE_DIR . '/products.json';
         if (!file_exists($file)) return [];
 
@@ -16,11 +12,15 @@ class DataStore {
 
         if (!empty($filters['source'])) {
             $src = $filters['source'];
-            $products = array_filter($products, function($p) use ($src) { return ($p['source'] ?? '') === $src; });
+            $products = array_filter($products, function($p) use ($src) {
+                return ($p['source'] ?? '') === $src;
+            });
         }
         if (!empty($filters['upload_status'])) {
             $us = $filters['upload_status'];
-            $products = array_filter($products, function($p) use ($us) { return ($p['upload_status'] ?? '') === $us; });
+            $products = array_filter($products, function($p) use ($us) {
+                return ($p['upload_status'] ?? '') === $us;
+            });
         }
         if (!empty($filters['search'])) {
             $q = strtolower($filters['search']);
@@ -34,7 +34,7 @@ class DataStore {
         return array_values($products);
     }
 
-    public static function saveProductsCache(array $products): void {
+    public static function saveProductsCache($products) {
         file_put_contents(
             CACHE_DIR . '/products.json',
             json_encode($products, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT),
@@ -42,41 +42,39 @@ class DataStore {
         );
     }
 
-    public static function getProductCount(): array {
-        $products = static::getProducts();
-        $total      = count($products);
-        $withAsin   = count(array_filter($products, function($p) { return !empty($p['asin_de']); }));
-        $notUploaded= count(array_filter($products, function($p) { return ($p['upload_status'] ?? '') === 'NOT_UPLOADED'; }));
-        $suppliers  = count(array_unique(array_column($products, 'source')));
+    public static function getProductCount() {
+        $products    = static::getProducts();
+        $total       = count($products);
+        $withAsin    = count(array_filter($products, function($p) { return !empty($p['asin_de']); }));
+        $notUploaded = count(array_filter($products, function($p) { return ($p['upload_status'] ?? '') === 'NOT_UPLOADED'; }));
+        $suppliers   = count(array_unique(array_column($products, 'source')));
         return compact('total', 'withAsin', 'notUploaded', 'suppliers');
     }
 
-    // ── Sync log ──────────────────────────────────────────────
-    public static function getSyncLog(): array {
+    public static function getSyncLog() {
         $file = DATA_DIR . '/sync_log.json';
         if (!file_exists($file)) return [];
         return json_decode(file_get_contents($file), true) ?? [];
     }
 
-    public static function appendSyncLog(array $entry): void {
+    public static function appendSyncLog($entry) {
         $log = static::getSyncLog();
         array_unshift($log, array_merge($entry, ['date' => date('Y-m-d H:i:s')]));
-        $log = array_slice($log, 0, 100); // keep last 100
+        $log = array_slice($log, 0, 100);
         file_put_contents(DATA_DIR . '/sync_log.json', json_encode($log, JSON_PRETTY_PRINT), LOCK_EX);
     }
 
-    // ── Settings ──────────────────────────────────────────────
-    public static function getSettings(): array {
+    public static function getSettings() {
         $file = DATA_DIR . '/settings.json';
         if (!file_exists($file)) return static::defaultSettings();
         return array_merge(static::defaultSettings(), json_decode(file_get_contents($file), true) ?? []);
     }
 
-    public static function saveSettings(array $settings): void {
+    public static function saveSettings($settings) {
         file_put_contents(DATA_DIR . '/settings.json', json_encode($settings, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
     }
 
-    private static function defaultSettings(): array {
+    private static function defaultSettings() {
         return [
             'marketplaces' => [
                 'DE' => ['vat' => 0.19, 'amazon_fee' => 0.15, 'shipping' => 4.50, 'fbm_fee' => 1.00, 'active' => true],
@@ -94,8 +92,7 @@ class DataStore {
         ];
     }
 
-    // ── Summary for dashboard ─────────────────────────────────
-    public static function getSummary(): array {
+    public static function getSummary() {
         $counts  = static::getProductCount();
         $syncLog = static::getSyncLog();
         $lastSync= $syncLog[0]['date'] ?? null;

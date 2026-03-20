@@ -1,7 +1,6 @@
 <?php
 class DashboardController {
-    public function index(): void {
-        require_once SRC . '/lib/GoogleApi.php';
+    public function index() {
         require_once SRC . '/lib/DataStore.php';
 
         $data = DataStore::getSummary();

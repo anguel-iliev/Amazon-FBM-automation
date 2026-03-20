@@ -1,7 +1,7 @@
 <?php
 class Auth {
 
-    public static function login(string $email, string $password): bool {
+    public static function login($email, $password) {
         require_once SRC . '/lib/UserStore.php';
         Session::start();
 
@@ -17,20 +17,20 @@ class Auth {
         return true;
     }
 
-    public static function logout(): void {
+    public static function logout() {
         Session::destroy();
     }
 
-    public static function isLoggedIn(): bool {
+    public static function isLoggedIn() {
         Session::start();
         return Session::get('logged_in') === true;
     }
 
-    public static function isAdmin(): bool {
+    public static function isAdmin() {
         return Session::get('user_role') === 'admin';
     }
 
-    public static function requireLogin(bool $jsonResponse = false): void {
+    public static function requireLogin($jsonResponse = false) {
         if (!static::isLoggedIn()) {
             if ($jsonResponse) {
                 http_response_code(401);
@@ -43,20 +43,20 @@ class Auth {
         }
     }
 
-    public static function requireAdmin(): void {
+    public static function requireAdmin() {
         static::requireLogin();
         if (!static::isAdmin()) {
             http_response_code(403);
-            View::render('errors/403');
+            View::render('errors/404');
             exit;
         }
     }
 
-    public static function user(): ?string {
+    public static function user() {
         return Session::get('user');
     }
 
-    public static function userId(): ?string {
+    public static function userId() {
         return Session::get('user_id');
     }
 }

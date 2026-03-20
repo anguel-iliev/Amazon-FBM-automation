@@ -2,12 +2,12 @@
 class AuthController {
 
     // ── Login ────────────────────────────────────────────────
-    public function loginPage(): void {
+    public function loginPage() {
         if (Auth::isLoggedIn()) View::redirect('/dashboard');
         View::render('auth/login', ['error' => null]);
     }
 
-    public function loginAction(): void {
+    public function loginAction() {
         if (Auth::isLoggedIn()) View::redirect('/dashboard');
 
         $email    = trim($_POST['email']    ?? '');
@@ -25,20 +25,20 @@ class AuthController {
             Logger::info("Login: {$email}");
             View::redirect('/dashboard');
         } else {
-            usleep(500000); // anti-brute-force
+            usleep(500000);
             Logger::warn("Failed login: {$email}");
             View::render('auth/login', ['error' => $result['error'] ?? 'Грешен имейл или парола.']);
         }
     }
 
-    public function logout(): void {
+    public function logout() {
         Logger::info("Logout: " . Auth::user());
         Auth::logout();
         View::redirect('/');
     }
 
     // ── Register (от покана) ─────────────────────────────────
-    public function registerPage(): void {
+    public function registerPage() {
         if (Auth::isLoggedIn()) View::redirect('/dashboard');
 
         $token = $_GET['token'] ?? '';
@@ -63,14 +63,13 @@ class AuthController {
         ]);
     }
 
-    public function registerAction(): void {
+    public function registerAction() {
         require_once SRC . '/lib/UserStore.php';
 
         $token    = trim($_POST['token']    ?? '');
         $password = trim($_POST['password'] ?? '');
         $confirm  = trim($_POST['confirm']  ?? '');
 
-        // Validate token
         $user = UserStore::verifyToken($token);
         if (!$user) {
             View::render('auth/register', [
@@ -81,7 +80,6 @@ class AuthController {
             return;
         }
 
-        // Validate password
         if (strlen($password) < 8) {
             View::render('auth/register', [
                 'error' => 'Паролата трябва да е поне 8 символа.',
@@ -99,23 +97,21 @@ class AuthController {
             return;
         }
 
-        // Set password and verify account
         UserStore::setPassword($user['email'], $password);
         Logger::info("Account activated: " . $user['email']);
 
-        // Auto-login
         Auth::login($user['email'], $password);
         Session::flash('success', 'Акаунтът е активиран успешно!');
         View::redirect('/dashboard');
     }
 
     // ── Forgot password ──────────────────────────────────────
-    public function forgotPage(): void {
+    public function forgotPage() {
         if (Auth::isLoggedIn()) View::redirect('/dashboard');
         View::render('auth/forgot', ['sent' => false, 'error' => null]);
     }
 
-    public function forgotAction(): void {
+    public function forgotAction() {
         require_once SRC . '/lib/UserStore.php';
         require_once SRC . '/lib/Mailer.php';
 
@@ -126,7 +122,6 @@ class AuthController {
             return;
         }
 
-        // Always show success (don't reveal if email exists)
         $token = UserStore::createResetToken($email);
         if ($token) {
             Mailer::sendPasswordReset($email, $token);
@@ -137,12 +132,12 @@ class AuthController {
     }
 
     // ── Reset password ───────────────────────────────────────
-    public function resetPage(): void {
+    public function resetPage() {
         if (Auth::isLoggedIn()) View::redirect('/dashboard');
 
         $token = $_GET['token'] ?? '';
         require_once SRC . '/lib/UserStore.php';
-        $user = UserStore::findByToken($token, 'reset');
+        $user  = UserStore::findByToken($token, 'reset');
         $valid = $user && ($user['reset_expires'] ?? 0) > time();
 
         View::render('auth/reset', [
@@ -152,7 +147,7 @@ class AuthController {
         ]);
     }
 
-    public function resetAction(): void {
+    public function resetAction() {
         require_once SRC . '/lib/UserStore.php';
 
         $token    = trim($_POST['token']    ?? '');
@@ -178,7 +173,7 @@ class AuthController {
     }
 
     // ── Admin: Invite user ───────────────────────────────────
-    public function invitePage(): void {
+    public function invitePage() {
         Auth::requireAdmin();
         require_once SRC . '/lib/UserStore.php';
         View::renderWithLayout('auth/invite', [
@@ -189,7 +184,7 @@ class AuthController {
         ]);
     }
 
-    public function inviteAction(): void {
+    public function inviteAction() {
         Auth::requireAdmin();
         require_once SRC . '/lib/UserStore.php';
         require_once SRC . '/lib/Mailer.php';
@@ -214,20 +209,19 @@ class AuthController {
             Session::flash('success', "Покана изпратена до {$email}");
             Logger::info("Invite sent to {$email} by " . Auth::user());
         } else {
-            Session::flash('error', 'Поканата е създадена, но имейлът не беше изпратен. Провери SMTP настройките в .env (SMTP_PASS).');
+            Session::flash('error', 'Поканата е създадена, но имейлът не беше изпратен. Провери SMTP настройките.');
         }
 
         View::redirect('/invite');
     }
 
     // ── Admin: Delete user ───────────────────────────────────
-    public function deleteUserAction(): void {
+    public function deleteUserAction() {
         Auth::requireAdmin();
         require_once SRC . '/lib/UserStore.php';
 
         $email = strtolower(trim($_POST['email'] ?? ''));
 
-        // Cannot delete yourself
         if ($email === strtolower(Auth::user() ?? '')) {
             Session::flash('error', 'Не можеш да изтриеш собствения си акаунт.');
             View::redirect('/invite');
@@ -245,7 +239,7 @@ class AuthController {
     }
 
     // ── Admin: Resend invite ─────────────────────────────────
-    public function resendInviteAction(): void {
+    public function resendInviteAction() {
         Auth::requireAdmin();
         require_once SRC . '/lib/UserStore.php';
         require_once SRC . '/lib/Mailer.php';
@@ -265,7 +259,6 @@ class AuthController {
             return;
         }
 
-        // Refresh token
         $token = UserStore::refreshInviteToken($email);
         if (!$token) {
             Session::flash('error', 'Грешка при обновяване на токена.');
@@ -278,7 +271,7 @@ class AuthController {
             Session::flash('success', "Поканата е изпратена повторно до {$email}");
             Logger::info("Invite resent to {$email} by " . Auth::user());
         } else {
-            Session::flash('error', 'Имейлът не беше изпратен. Провери SMTP настройките в .env.');
+            Session::flash('error', 'Имейлът не беше изпратен. Провери SMTP настройките.');
         }
 
         View::redirect('/invite');

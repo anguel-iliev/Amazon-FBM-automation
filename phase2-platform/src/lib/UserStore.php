@@ -1,25 +1,6 @@
 <?php
 /**
  * UserStore — управление на потребители (JSON файл)
- * Система с покани: само предварително добавени имейли могат да се регистрират.
- *
- * users.json структура:
- * [
- *   {
- *     "id":             "uuid",
- *     "email":          "user@example.com",
- *     "password_hash":  "$2y$...",
- *     "verified":       true/false,
- *     "verify_token":   "hex_token",
- *     "verify_expires": 1234567890,
- *     "reset_token":    "hex_token",
- *     "reset_expires":  1234567890,
- *     "invited_by":     "admin",
- *     "created_at":     "2025-01-01T00:00:00",
- *     "last_login":     "2025-01-01T00:00:00",
- *     "role":           "user" | "admin"
- *   }
- * ]
  */
 class UserStore {
 
@@ -32,14 +13,13 @@ class UserStore {
         return static::$file;
     }
 
-    // ── Read / Write ──────────────────────────────────────────
-    public static function all(): array {
+    public static function all() {
         $f = static::file();
         if (!file_exists($f)) return [];
         return json_decode(file_get_contents($f), true) ?? [];
     }
 
-    private static function save(array $users): void {
+    private static function save($users) {
         file_put_contents(
             static::file(),
             json_encode(array_values($users), JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE),
@@ -47,15 +27,14 @@ class UserStore {
         );
     }
 
-    // ── Find ──────────────────────────────────────────────────
-    public static function findByEmail(string $email): ?array {
+    public static function findByEmail($email) {
         foreach (static::all() as $u) {
             if (strtolower($u['email']) === strtolower($email)) return $u;
         }
         return null;
     }
 
-    public static function findByToken(string $token, string $type = 'verify'): ?array {
+    public static function findByToken($token, $type = 'verify') {
         $field = $type === 'reset' ? 'reset_token' : 'verify_token';
         foreach (static::all() as $u) {
             if (($u[$field] ?? '') === $token) return $u;
@@ -63,12 +42,7 @@ class UserStore {
         return null;
     }
 
-    // ── Invite ────────────────────────────────────────────────
-    /**
-     * Добавя имейл в списъка с поканени.
-     * Потребителят ще получи имейл с линк за регистрация.
-     */
-    public static function invite(string $email, string $invitedBy = 'admin'): array {
+    public static function invite($email, $invitedBy = 'admin') {
         $email = strtolower(trim($email));
 
         if (static::findByEmail($email)) {
@@ -99,8 +73,7 @@ class UserStore {
         return ['ok' => true, 'token' => $token, 'user' => $user];
     }
 
-    // ── Register (set password after invite) ──────────────────
-    public static function setPassword(string $email, string $password): bool {
+    public static function setPassword($email, $password) {
         $users = static::all();
         foreach ($users as &$u) {
             if (strtolower($u['email']) === strtolower($email)) {
@@ -115,19 +88,17 @@ class UserStore {
         return false;
     }
 
-    // ── Verify token ─────────────────────────────────────────
-    public static function verifyToken(string $token): ?array {
+    public static function verifyToken($token) {
         $users = static::all();
         foreach ($users as &$u) {
             if (($u['verify_token'] ?? '') !== $token) continue;
-            if (($u['verify_expires'] ?? 0) < time()) return null; // expired
+            if (($u['verify_expires'] ?? 0) < time()) return null;
             return $u;
         }
         return null;
     }
 
-    // ── Login ─────────────────────────────────────────────────
-    public static function authenticate(string $email, string $password): array {
+    public static function authenticate($email, $password) {
         $user = static::findByEmail($email);
 
         if (!$user) {
@@ -143,14 +114,12 @@ class UserStore {
             return ['ok' => false, 'error' => 'Грешен имейл или парола.'];
         }
 
-        // Update last login
         static::updateField($email, 'last_login', date('c'));
 
         return ['ok' => true, 'user' => $user];
     }
 
-    // ── Password reset ────────────────────────────────────────
-    public static function createResetToken(string $email): ?string {
+    public static function createResetToken($email) {
         $users = static::all();
         foreach ($users as &$u) {
             if (strtolower($u['email']) !== strtolower($email)) continue;
@@ -165,7 +134,7 @@ class UserStore {
         return null;
     }
 
-    public static function resetPassword(string $token, string $newPassword): bool {
+    public static function resetPassword($token, $newPassword) {
         $users = static::all();
         foreach ($users as &$u) {
             if (($u['reset_token'] ?? '') !== $token) continue;
@@ -179,7 +148,6 @@ class UserStore {
         return false;
     }
 
-    // ── Helpers ───────────────────────────────────────────────
     private static function updateField($email, $field, $value) {
         $users = static::all();
         foreach ($users as &$u) {
@@ -191,22 +159,22 @@ class UserStore {
         static::save($users);
     }
 
-    public static function count(): int {
+    public static function count() {
         return count(array_filter(static::all(), function($u) { return !empty($u['verified']); }));
     }
 
-    // ── Delete ────────────────────────────────────────────────
-    public static function deleteByEmail(string $email): bool {
-        $users = static::all();
+    public static function deleteByEmail($email) {
+        $users  = static::all();
         $before = count($users);
-        $users  = array_values(array_filter($users, function($u) use ($email) { return strtolower($u['email']) !== strtolower($email); }));
+        $users  = array_values(array_filter($users, function($u) use ($email) {
+            return strtolower($u['email']) !== strtolower($email);
+        }));
         if (count($users) === $before) return false;
         static::save($users);
         return true;
     }
 
-    // ── Refresh invite token ──────────────────────────────────
-    public static function refreshInviteToken(string $email): ?string {
+    public static function refreshInviteToken($email) {
         $users = static::all();
         foreach ($users as &$u) {
             if (strtolower($u['email']) !== strtolower($email)) continue;

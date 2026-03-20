@@ -1,6 +1,4 @@
 <?php
-declare(strict_types=1);
-
 define('ROOT', __DIR__);
 define('SRC',  ROOT . '/src');
 define('VERSION', '1.2.0');

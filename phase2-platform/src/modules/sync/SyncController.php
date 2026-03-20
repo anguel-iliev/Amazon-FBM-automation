@@ -1,6 +1,6 @@
 <?php
 class SyncController {
-    public function index(): void {
+    public function index() {
         require_once SRC . '/lib/DataStore.php';
 
         $syncLog  = DataStore::getSyncLog();
@@ -15,10 +15,9 @@ class SyncController {
         ]);
     }
 
-    public function run(): void {
+    public function run() {
         require_once SRC . '/lib/DataStore.php';
 
-        // Run Python sync script
         $pythonScript = ROOT . '/cron/sync_products.py';
         $logFile      = LOGS_DIR . '/sync_' . date('Y-m-d_His') . '.log';
 
@@ -36,7 +35,7 @@ class SyncController {
         View::redirect('/sync');
     }
 
-    public function status(): void {
+    public function status() {
         require_once SRC . '/lib/DataStore.php';
         $log = DataStore::getSyncLog();
         View::json([

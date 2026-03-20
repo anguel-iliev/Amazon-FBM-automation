@@ -3,81 +3,76 @@
 /**
  * AMZ Retail — Setup script
  * Стартирай: php setup.php
+ * Създава първия admin потребител директно.
  */
-
 define('ROOT', __DIR__);
+define('SRC',  ROOT . '/src');
+define('TOKEN_EXPIRY', 86400);
 
-echo "\n===========================================\n";
-echo " AMZ Retail Platform — Setup\n";
-echo "===========================================\n\n";
-
-// Check PHP version
-if (PHP_VERSION_ID < 80000) {
-    echo "ERROR: PHP 8.0+ required. Current: " . PHP_VERSION . "\n";
-    exit(1);
-}
-
-// Check .env
+// Minimal env load
 $envFile = ROOT . '/.env';
-if (!file_exists($envFile)) {
+if (!file_exists($envFile) && file_exists(ROOT . '/.env.example')) {
     copy(ROOT . '/.env.example', $envFile);
     echo "✓ Created .env from .env.example\n";
-} else {
-    echo "✓ .env already exists\n";
 }
 
-// Create data directories
 foreach (['data', 'data/logs', 'data/cache', 'data/cache/tmp_downloads'] as $dir) {
     $path = ROOT . '/' . $dir;
-    if (!is_dir($path)) {
-        mkdir($path, 0755, true);
-        echo "✓ Created $dir/\n";
+    if (!is_dir($path)) { mkdir($path, 0755, true); echo "✓ Created {$dir}/\n"; }
+}
+
+file_put_contents(ROOT . '/data/.htaccess', "Deny from all\n");
+
+define('DATA_DIR', ROOT . '/data');
+
+require_once SRC . '/lib/UserStore.php';
+
+echo "\n===========================================\n";
+echo " AMZ Retail Platform — Setup v1.1\n";
+echo "===========================================\n\n";
+
+echo "Enter admin email: ";
+$email = trim(fgets(STDIN));
+
+echo "Enter admin password (min 8 chars): ";
+$password = trim(fgets(STDIN));
+
+if (!filter_var($email, FILTER_VALIDATE_EMAIL)) { echo "Invalid email.\n"; exit(1); }
+if (strlen($password) < 8) { echo "Password too short.\n"; exit(1); }
+
+// Create admin user directly
+$users = UserStore::all();
+foreach ($users as $u) {
+    if (strtolower($u['email']) === strtolower($email)) {
+        echo "User already exists.\n"; exit(1);
     }
 }
 
-// Create .htaccess for data dir protection
-$dataHtaccess = ROOT . '/data/.htaccess';
-if (!file_exists($dataHtaccess)) {
-    file_put_contents($dataHtaccess, "Deny from all\n");
-    echo "✓ Protected data/ directory\n";
-}
+$admin = [
+    'id'             => bin2hex(random_bytes(8)),
+    'email'          => strtolower($email),
+    'password_hash'  => password_hash($password, PASSWORD_BCRYPT),
+    'verified'       => true,
+    'invited'        => false,
+    'verify_token'   => '',
+    'verify_expires' => 0,
+    'reset_token'    => '',
+    'reset_expires'  => 0,
+    'invited_by'     => 'setup',
+    'created_at'     => date('c'),
+    'last_login'     => null,
+    'role'           => 'admin',
+];
 
-// Generate password hash
-echo "\n--- Set admin password ---\n";
-echo "Enter password for admin user: ";
-$handle   = fopen("php://stdin", "r");
-$password = trim(fgets($handle));
-fclose($handle);
+$users[] = $admin;
+file_put_contents(
+    DATA_DIR . '/users.json',
+    json_encode(array_values($users), JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE),
+    LOCK_EX
+);
 
-if (strlen($password) < 6) {
-    echo "ERROR: Password must be at least 6 characters.\n";
-    exit(1);
-}
-
-$hash = password_hash($password, PASSWORD_BCRYPT);
-
-// Update .env
-$env = file_get_contents($envFile);
-$env = preg_replace('/^AUTH_PASSWORD=.*/m', 'AUTH_PASSWORD=' . $hash, $env);
-if (!str_contains($env, 'AUTH_PASSWORD=')) {
-    $env .= "\nAUTH_PASSWORD=" . $hash;
-}
-file_put_contents($envFile, $env);
-
-echo "✓ Password set and saved to .env\n";
-
-// Check Python
-echo "\n--- Python check ---\n";
-$pythonVersion = shell_exec('python3 --version 2>&1');
-echo "Python: " . ($pythonVersion ?: "NOT FOUND") . "\n";
-
-$pip = shell_exec('pip3 show gspread 2>&1');
-if (str_contains($pip ?? '', 'Version:')) {
-    echo "✓ gspread installed\n";
-} else {
-    echo "⚠ gspread not installed. Run:\n";
-    echo "  pip3 install gspread google-auth openpyxl pandas --user\n";
-}
-
-echo "\n✅ Setup complete!\n";
-echo "Open: https://amz-retail.tnsoft.eu\n\n";
+echo "\n✅ Admin created: {$email}\n";
+echo "✅ Open: https://amz-retail.tnsoft.eu\n\n";
+echo "Next: Edit .env → set SMTP_PASS (Gmail App Password)\n";
+echo "Then: Login → Settings → Add Google credentials\n";
+echo "Then: Admin menu → /invite → invite other users\n\n";

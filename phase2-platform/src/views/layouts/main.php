@@ -64,6 +64,12 @@
           <div class="user-role">Administrator</div>
         </div>
       </div>
+      <?php if (Auth::isAdmin()): ?>
+      <a href="/invite" style="display:flex;align-items:center;gap:8px;padding:7px 16px;margin:0 8px 8px;border-radius:4px;color:var(--muted);text-decoration:none;font-size:13px;font-weight:500;transition:color 0.15s,background 0.15s" onmouseover="this.style.color='var(--text)';this.style.background='rgba(255,255,255,0.05)'" onmouseout="this.style.color='var(--muted)';this.style.background=''">
+        <svg width="15" height="15" viewBox="0 0 20 20" fill="none"><path d="M14 11c2.2 0 4 1.8 4 4v1M1 16v-1c0-2.2 1.8-4 4-4M10 10a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM16 8v4M18 10h-4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+        Покани потребител
+      </a>
+      <?php endif; ?>
       <a href="/logout" class="btn-logout" title="Изход">
         <svg viewBox="0 0 20 20" fill="none" width="16" height="16"><path d="M13 10H3M10 7l3 3-3 3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M8 5H5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
       </a>

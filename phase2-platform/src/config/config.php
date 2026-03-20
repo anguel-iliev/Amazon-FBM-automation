@@ -1,15 +1,14 @@
 <?php
 // ============================================================
 //  AMZ Retail Platform — Configuration
-//  Копирай .env.example в .env и попълни стойностите
 // ============================================================
 
-// Load .env if exists
 $envFile = ROOT . '/.env';
 if (file_exists($envFile)) {
     $lines = file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
     foreach ($lines as $line) {
         if (strpos(trim($line), '#') === 0) continue;
+        if (strpos($line, '=') === false) continue;
         [$key, $val] = explode('=', $line, 2);
         $_ENV[trim($key)] = trim($val);
     }
@@ -28,10 +27,17 @@ define('TIMEZONE',    'Europe/Sofia');
 date_default_timezone_set(TIMEZONE);
 
 // ── Auth ────────────────────────────────────────────────────
-define('AUTH_USER',     env('AUTH_USER', 'admin'));
-define('AUTH_PASSWORD', env('AUTH_PASSWORD', '')); // bcrypt hash
-define('SESSION_NAME',  'amz_session');
-define('SESSION_LIFE',  86400 * 7); // 7 days
+define('SESSION_NAME',   'amz_session');
+define('SESSION_LIFE',   86400 * 7);  // 7 дни
+define('TOKEN_EXPIRY',   3600 * 24);  // 24ч за verify/reset токени
+
+// ── SMTP ────────────────────────────────────────────────────
+define('SMTP_HOST',      env('SMTP_HOST',      'smtp.gmail.com'));
+define('SMTP_PORT',      (int)env('SMTP_PORT', '587'));
+define('SMTP_USER',      env('SMTP_USER',      ''));
+define('SMTP_PASS',      env('SMTP_PASS',      ''));
+define('SMTP_FROM',      env('SMTP_FROM',      ''));
+define('SMTP_FROM_NAME', env('SMTP_FROM_NAME', 'AMZ Retail'));
 
 // ── Google API ──────────────────────────────────────────────
 define('GOOGLE_CREDENTIALS_FILE', ROOT . '/src/config/google-credentials.json');
@@ -53,9 +59,12 @@ spl_autoload_register(function (string $class) {
         'Router'              => SRC . '/lib/Router.php',
         'Session'             => SRC . '/lib/Session.php',
         'Auth'                => SRC . '/lib/Auth.php',
+        'UserStore'           => SRC . '/lib/UserStore.php',
+        'Mailer'              => SRC . '/lib/Mailer.php',
         'View'                => SRC . '/lib/View.php',
         'GoogleApi'           => SRC . '/lib/GoogleApi.php',
         'Logger'              => SRC . '/lib/Logger.php',
+        'DataStore'           => SRC . '/lib/DataStore.php',
         'AuthController'      => SRC . '/auth/AuthController.php',
         'DashboardController' => SRC . '/dashboard/DashboardController.php',
         'ProductsController'  => SRC . '/modules/products/ProductsController.php',

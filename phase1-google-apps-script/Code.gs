@@ -1,12 +1,12 @@
 // ╔══════════════════════════════════════════════════════════════╗
-//  GMAIL → DRIVE  |  АВТОМАТИЗАЦИЯ НА ДОСТАВЧИЦИ  v4.6
-//  Стартирай: testScript() → processEmailsAndUpload() → setupTrigger()
+//  GMAIL → DRIVE  |  АВТОМАТИЗАЦИЯ НА ДОСТАВЧИЦИ  v4.7
+//  Стартирай: testScript() → resetProcessedLabel() → processEmailsAndUpload() → setupTrigger()
 //
-//  Промени v4.6:
-//  - SELF-CHAINING: при достигане на 5-мин лимит скриптът сам
-//    планира продължение след 90 секунди — напълно автоматично.
-//    Пусни processEmailsAndUpload() ВЕДНЪЖ — всичко останало
-//    се случва само.
+//  Промени v4.7:
+//  - FIX: нишката се маркира "Обработена" САМО ако са качени файлове
+//    (преди това се маркираше дори при "непознат доставчик" → 0 файлове)
+//  - resetProcessedLabel(): нулира лейбъла без да трие Drive файловете
+//  Промени v4.6: SELF-CHAINING автоматично продължение
 //  Промени v4.5: BATCH MODE
 //  Промени v4.4: STRICT MODE (само MANUAL_MAPPING)
 // ╚══════════════════════════════════════════════════════════════╝
@@ -185,11 +185,25 @@ function _run(mode) {
       Logger.log('');
       Logger.log('[' + (i+1) + '/' + total + '] ' + subject);
 
+      var uploadedBefore = stats.uploaded;
+      var excludedBefore = stats.excluded;
+
       var messages = thread.getMessages();
       for (var j = 0; j < messages.length; j++) {
         _processMessage(messages[j], stats);
       }
-      thread.addLabel(processedLabel);
+
+      // Маркирай като "Обработена" само ако:
+      // - са качени файлове от тази нишка, VAGY
+      // - нишката е изключена/блокирана (няма прикачени файлове)
+      // НЕ маркирай ако всички съобщения са "непознат доставчик"
+      var uploadedFromThread = stats.uploaded - uploadedBefore;
+      var excludedFromThread = stats.excluded - excludedBefore;
+      if (uploadedFromThread > 0 || excludedFromThread > 0) {
+        thread.addLabel(processedLabel);
+      } else {
+        Logger.log('  [!] Нишката НЕ е маркирана — без качени файлове (вероятно непознат доставчик)');
+      }
     }
 
     // Всичко обработено успешно
@@ -643,8 +657,40 @@ function _continueProcessing() {
 }
 
 // ============================================================
-//  РЕСЕТ  (FIX v4.1: DRY_RUN по подразбиране)
+//  НУЛИРАНЕ НА ЛЕЙБЪЛА "ОБРАБОТЕНИ"
+//  Използвай когато файловете не са качени но лейбълът е сложен.
+//  НЕ трие папките в Drive.
 // ============================================================
+function resetProcessedLabel() {
+  Logger.log('');
+  Logger.log('=== НУЛИРАНЕ НА ЛЕЙБЪЛ "Обработени" ===');
+  Logger.log('');
+
+  var processed = GmailApp.getUserLabelByName(CONFIG.PROCESSED_LABEL);
+  if (!processed) {
+    Logger.log('Лейбълът "' + CONFIG.PROCESSED_LABEL + '" не съществува — нищо за нулиране.');
+    return;
+  }
+
+  var threads = processed.getThreads();
+  Logger.log('Намерени ' + threads.length + ' нишки с лейбъл "Обработени".');
+
+  var removed = 0;
+  for (var i = 0; i < threads.length; i++) {
+    threads[i].removeLabel(processed);
+    removed++;
+  }
+
+  // Нулирай и batch offset
+  var props = PropertiesService.getScriptProperties();
+  props.deleteProperty('BATCH_OFFSET_all');
+  props.deleteProperty('BATCH_OFFSET_new');
+  props.deleteProperty('LAST_RUN_TIMESTAMP');
+
+  Logger.log('✅ Премахнат лейбъл от ' + removed + ' нишки.');
+  Logger.log('Можеш да пуснеш processEmailsAndUpload() отново.');
+  Logger.log('');
+}
 function resetAndReprocess() {
   var DRY_RUN = true; // ← СМЕНИ НА false ЗА РЕАЛНО ИЗТРИВАНЕ
 

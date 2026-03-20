@@ -51,5 +51,6 @@ $router->add('GET',  '/api/stats',                 'ApiController',       'stats
 $router->add('GET',  '/api/products',              'ApiController',       'products');
 $router->add('POST', '/api/sync',                  'ApiController',       'sync');
 $router->add('POST', '/api/test-email',            'ApiController',       'testEmail');
+$router->add('POST', '/api/import-excel',          'ApiController',       'importExcel');
 
 $router->dispatch();

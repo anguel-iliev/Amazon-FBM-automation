@@ -109,7 +109,7 @@ $suppliers    = $s['suppliers']     ?? 0;
         <tr>
           <td class="text-muted text-sm"><?= htmlspecialchars($p['ean'] ?? '—') ?></td>
           <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
-            <?= htmlspecialchars($p['product_name'] ?? '—') ?>
+            <?= htmlspecialchars($p['model'] ?? $p['product_name'] ?? '—') ?>
           </td>
           <td><span class="badge badge-muted"><?= htmlspecialchars($p['source'] ?? '—') ?></span></td>
           <td class="font-head"><?= number_format((float)($p['supplier_price'] ?? 0), 2) ?></td>
@@ -126,7 +126,7 @@ $suppliers    = $s['suppliers']     ?? 0;
           <td>
             <?php $status = $p['upload_status'] ?? 'NOT_UPLOADED'; ?>
             <span class="badge <?= $status === 'UPLOADED' ? 'badge-green' : 'badge-gold' ?>">
-              <?= $status ?>
+              <?= $status === 'UPLOADED' ? 'Качен' : 'За качване' ?>
             </span>
           </td>
         </tr>

@@ -1,6 +1,8 @@
 <?php
 /**
  * DataStore — файлово базирано хранилище (JSON)
+ * Данните се съхраняват в data/cache/products.json — персистентно,
+ * не се изтрива при рестарт на сървъра, само при ръчна замяна.
  */
 class DataStore {
 
@@ -12,23 +14,32 @@ class DataStore {
 
         if (!empty($filters['source'])) {
             $src = $filters['source'];
-            $products = array_filter($products, function($p) use ($src) {
+            $products = array_values(array_filter($products, function($p) use ($src) {
                 return ($p['source'] ?? '') === $src;
-            });
+            }));
         }
         if (!empty($filters['upload_status'])) {
             $us = $filters['upload_status'];
-            $products = array_filter($products, function($p) use ($us) {
+            $products = array_values(array_filter($products, function($p) use ($us) {
                 return ($p['upload_status'] ?? '') === $us;
-            });
+            }));
+        }
+        if (!empty($filters['brand'])) {
+            $br = $filters['brand'];
+            $products = array_values(array_filter($products, function($p) use ($br) {
+                return ($p['brand'] ?? '') === $br;
+            }));
         }
         if (!empty($filters['search'])) {
             $q = strtolower($filters['search']);
-            $products = array_filter($products, function($p) use ($q) {
-                return strpos(strtolower($p['product_name'] ?? ''), $q) !== false ||
-                       strpos(strtolower($p['ean'] ?? ''), $q) !== false ||
-                       strpos(strtolower($p['asin_de'] ?? ''), $q) !== false;
-            });
+            $products = array_values(array_filter($products, function($p) use ($q) {
+                return strpos(strtolower($p['model'] ?? ''), $q) !== false
+                    || strpos(strtolower($p['brand'] ?? ''), $q) !== false
+                    || strpos(strtolower($p['ean'] ?? ''), $q) !== false
+                    || strpos(strtolower($p['asin_de'] ?? ''), $q) !== false
+                    || strpos(strtolower($p['our_sku'] ?? ''), $q) !== false
+                    || strpos(strtolower($p['source'] ?? ''), $q) !== false;
+            }));
         }
 
         return array_values($products);
@@ -47,7 +58,7 @@ class DataStore {
         $total       = count($products);
         $withAsin    = count(array_filter($products, function($p) { return !empty($p['asin_de']); }));
         $notUploaded = count(array_filter($products, function($p) { return ($p['upload_status'] ?? '') === 'NOT_UPLOADED'; }));
-        $suppliers   = count(array_unique(array_column($products, 'source')));
+        $suppliers   = count(array_unique(array_filter(array_column($products, 'source'))));
         return compact('total', 'withAsin', 'notUploaded', 'suppliers');
     }
 
@@ -95,7 +106,7 @@ class DataStore {
     public static function getSummary() {
         $counts  = static::getProductCount();
         $syncLog = static::getSyncLog();
-        $lastSync= $syncLog[0]['date'] ?? null;
+        $lastSync= !empty($syncLog[0]['date']) ? $syncLog[0]['date'] : null;
 
         return [
             'stats' => [

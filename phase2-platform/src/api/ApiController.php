@@ -90,4 +90,37 @@ class ApiController {
             View::json(['success' => false, 'error' => 'Грешка при изпращане. Провери SMTP настройките.'], 500);
         }
     }
+
+    public function importExcel() {
+        require_once SRC . '/lib/DataStore.php';
+
+        if (empty($_FILES['file']['tmp_name'])) {
+            View::json(['success' => false, 'error' => 'Не е избран файл.'], 400);
+            return;
+        }
+
+        $tmp = $_FILES['file']['tmp_name'];
+        $dest = CACHE_DIR . '/upload_' . time() . '.xlsx';
+
+        if (!move_uploaded_file($tmp, $dest)) {
+            View::json(['success' => false, 'error' => 'Грешка при качване на файла.'], 500);
+            return;
+        }
+
+        // Use Python to parse the Excel file
+        $script = ROOT . '/cron/parse_excel.py';
+        $out    = CACHE_DIR . '/products.json';
+        $cmd    = 'python3 ' . escapeshellarg($script) . ' ' . escapeshellarg($dest) . ' ' . escapeshellarg($out) . ' 2>&1';
+        $result = shell_exec($cmd);
+        @unlink($dest);
+
+        if (!file_exists($out)) {
+            View::json(['success' => false, 'error' => 'Грешка при парсване: ' . $result], 500);
+            return;
+        }
+
+        $products = json_decode(file_get_contents($out), true) ?? [];
+        Logger::info('Excel import: ' . count($products) . ' products by ' . Auth::user());
+        View::json(['success' => true, 'count' => count($products)]);
+    }
 }

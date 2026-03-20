@@ -1,0 +1,113 @@
+<?php
+/**
+ * DataStore — файлово базирано хранилище (JSON)
+ * Без нужда от MySQL/PostgreSQL.
+ * Данните за продуктите идват от Google Sheets чрез Python.
+ * Локално се пазят: sync logs, settings, cache.
+ */
+class DataStore {
+
+    // ── Products (кешират се от Google Sheets) ────────────────
+    public static function getProducts(array $filters = []): array {
+        $file = CACHE_DIR . '/products.json';
+        if (!file_exists($file)) return [];
+
+        $products = json_decode(file_get_contents($file), true) ?? [];
+
+        if (!empty($filters['source'])) {
+            $products = array_filter($products, fn($p) => ($p['source'] ?? '') === $filters['source']);
+        }
+        if (!empty($filters['upload_status'])) {
+            $products = array_filter($products, fn($p) => ($p['upload_status'] ?? '') === $filters['upload_status']);
+        }
+        if (!empty($filters['search'])) {
+            $q = strtolower($filters['search']);
+            $products = array_filter($products, fn($p) =>
+                str_contains(strtolower($p['product_name'] ?? ''), $q) ||
+                str_contains(strtolower($p['ean'] ?? ''), $q) ||
+                str_contains(strtolower($p['asin_de'] ?? ''), $q)
+            );
+        }
+
+        return array_values($products);
+    }
+
+    public static function saveProductsCache(array $products): void {
+        file_put_contents(
+            CACHE_DIR . '/products.json',
+            json_encode($products, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT),
+            LOCK_EX
+        );
+    }
+
+    public static function getProductCount(): array {
+        $products = static::getProducts();
+        $total      = count($products);
+        $withAsin   = count(array_filter($products, fn($p) => !empty($p['asin_de'])));
+        $notUploaded= count(array_filter($products, fn($p) => ($p['upload_status'] ?? '') === 'NOT_UPLOADED'));
+        $suppliers  = count(array_unique(array_column($products, 'source')));
+        return compact('total', 'withAsin', 'notUploaded', 'suppliers');
+    }
+
+    // ── Sync log ──────────────────────────────────────────────
+    public static function getSyncLog(): array {
+        $file = DATA_DIR . '/sync_log.json';
+        if (!file_exists($file)) return [];
+        return json_decode(file_get_contents($file), true) ?? [];
+    }
+
+    public static function appendSyncLog(array $entry): void {
+        $log = static::getSyncLog();
+        array_unshift($log, array_merge($entry, ['date' => date('Y-m-d H:i:s')]));
+        $log = array_slice($log, 0, 100); // keep last 100
+        file_put_contents(DATA_DIR . '/sync_log.json', json_encode($log, JSON_PRETTY_PRINT), LOCK_EX);
+    }
+
+    // ── Settings ──────────────────────────────────────────────
+    public static function getSettings(): array {
+        $file = DATA_DIR . '/settings.json';
+        if (!file_exists($file)) return static::defaultSettings();
+        return array_merge(static::defaultSettings(), json_decode(file_get_contents($file), true) ?? []);
+    }
+
+    public static function saveSettings(array $settings): void {
+        file_put_contents(DATA_DIR . '/settings.json', json_encode($settings, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
+    }
+
+    private static function defaultSettings(): array {
+        return [
+            'marketplaces' => [
+                'DE' => ['vat' => 0.19, 'amazon_fee' => 0.15, 'shipping' => 4.50, 'fbm_fee' => 1.00, 'active' => true],
+                'FR' => ['vat' => 0.20, 'amazon_fee' => 0.15, 'shipping' => 5.00, 'fbm_fee' => 1.00, 'active' => true],
+                'IT' => ['vat' => 0.22, 'amazon_fee' => 0.15, 'shipping' => 5.50, 'fbm_fee' => 1.00, 'active' => true],
+                'ES' => ['vat' => 0.21, 'amazon_fee' => 0.15, 'shipping' => 5.50, 'fbm_fee' => 1.00, 'active' => true],
+                'NL' => ['vat' => 0.21, 'amazon_fee' => 0.15, 'shipping' => 4.50, 'fbm_fee' => 1.00, 'active' => true],
+                'PL' => ['vat' => 0.23, 'amazon_fee' => 0.15, 'shipping' => 6.00, 'fbm_fee' => 1.00, 'active' => false],
+                'SE' => ['vat' => 0.25, 'amazon_fee' => 0.15, 'shipping' => 7.00, 'fbm_fee' => 1.00, 'active' => false],
+            ],
+            'min_margin'      => 0.15,
+            'sync_auto'       => true,
+            'google_sheet_id' => '',
+            'drive_folder_id' => '100T4KgyVIXhKlJczQv7DR9CJlV27DbUx',
+        ];
+    }
+
+    // ── Summary for dashboard ─────────────────────────────────
+    public static function getSummary(): array {
+        $counts  = static::getProductCount();
+        $syncLog = static::getSyncLog();
+        $lastSync= $syncLog[0]['date'] ?? null;
+
+        return [
+            'stats' => [
+                'total_products' => $counts['total'],
+                'with_asin'      => $counts['withAsin'],
+                'not_uploaded'   => $counts['notUploaded'],
+                'suppliers'      => $counts['suppliers'],
+                'last_sync'      => $lastSync,
+            ],
+            'recent'  => array_slice(static::getProducts(), 0, 10),
+            'syncLog' => $syncLog,
+        ];
+    }
+}

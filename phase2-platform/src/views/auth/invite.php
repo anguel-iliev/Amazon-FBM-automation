@@ -1,8 +1,8 @@
 <?php
 $users   = $users ?? [];
 $smtpOk  = $smtpOk ?? false;
-$admins  = array_filter($users, fn($u) => ($u['role'] ?? '') === 'admin');
-$regular = array_filter($users, fn($u) => ($u['role'] ?? '') !== 'admin');
+$admins  = array_filter($users, function($u) { return ($u['role'] ?? '') === 'admin'; });
+$regular = array_filter($users, function($u) { return ($u['role'] ?? '') !== 'admin'; });
 $me      = Auth::user();
 ?>
 
@@ -67,7 +67,7 @@ $me      = Auth::user();
 <div class="card mt-16" style="padding:0">
   <div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
     <div class="card-title" style="margin:0">Потребители (<?= count($users) ?>)</div>
-    <span class="text-sm text-muted"><?= count(array_filter($users, fn($u) => $u['verified'] ?? false)) ?> активни</span>
+    <span class="text-sm text-muted"><?= count(array_filter($users, function($u) { return !empty($u['verified']); })) ?> активни</span>
   </div>
   <div class="table-wrap">
     <table>

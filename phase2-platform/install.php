@@ -15,7 +15,7 @@ $alreadySetup = file_exists($usersFile) &&
     !empty(json_decode(file_get_contents($usersFile), true));
 
 // ── Helpers ──────────────────────────────────────────────────────
-function readEnvFile(): array {
+function readEnvFile() {
     $file = ROOT . '/.env';
     // fallback to .env.example if .env not yet created
     if (!file_exists($file)) $file = ROOT . '/.env.example';
@@ -24,20 +24,20 @@ function readEnvFile(): array {
     foreach (file($file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $line) {
         $line = trim($line);
         if ($line === '' || $line[0] === '#') { $map[] = $line; continue; }
-        if (!str_contains($line, '=')) { $map[] = $line; continue; }
+        if (strpos($line, '=') === false) { $map[] = $line; continue; }
         [$k, $v] = explode('=', $line, 2);
         $map[trim($k)] = trim($v);
     }
     return $map;
 }
-function writeEnvFile(array $map): void {
+function writeEnvFile($map) {
     $lines = [];
     foreach ($map as $k => $v) {
         $lines[] = is_int($k) ? $v : "$k=$v";
     }
     file_put_contents(ROOT . '/.env', implode("\n", $lines) . "\n", LOCK_EX);
 }
-function envVal(string $key, string $default = ''): string {
+function envVal($key, $default = '') {
     $map = readEnvFile();
     return $map[$key] ?? $default;
 }
@@ -83,7 +83,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $step === 1) {
             foreach (file($envPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $line) {
                 $line = trim($line);
                 if ($line === '' || $line[0] === '#') { $map[] = $line; continue; }
-                if (!str_contains($line, '=')) { $map[] = $line; continue; }
+                if (strpos($line, '=') === false) { $map[] = $line; continue; }
                 [$k, $v] = explode('=', $line, 2);
                 $map[trim($k)] = trim($v);
             }
@@ -92,7 +92,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $step === 1) {
             foreach (file($example, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $line) {
                 $line = trim($line);
                 if ($line === '' || $line[0] === '#') { $map[] = $line; continue; }
-                if (!str_contains($line, '=')) { $map[] = $line; continue; }
+                if (strpos($line, '=') === false) { $map[] = $line; continue; }
                 [$k, $v] = explode('=', $line, 2);
                 $map[trim($k)] = trim($v);
             }

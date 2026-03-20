@@ -1,8 +1,8 @@
 <?php
 class View {
-    private static array $data = [];
+    private static $data = [];
 
-    public static function render(string $template, array $data = []): void {
+    public static function render($template, $data = []) {
         static::$data = array_merge(static::$data, $data);
         extract(static::$data);
 
@@ -13,29 +13,26 @@ class View {
         require $file;
     }
 
-    public static function renderWithLayout(string $template, array $data = [], string $layout = 'layouts/main'): void {
-        // Capture content
+    public static function renderWithLayout($template, $data = [], $layout = 'layouts/main') {
         ob_start();
         static::render($template, $data);
         $content = ob_get_clean();
-
-        // Render layout with content
         static::render($layout, array_merge($data, ['content' => $content]));
     }
 
-    public static function json(mixed $data, int $status = 200): void {
+    public static function json($data, $status = 200) {
         http_response_code($status);
         header('Content-Type: application/json; charset=utf-8');
         echo json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         exit;
     }
 
-    public static function redirect(string $url): void {
+    public static function redirect($url) {
         header('Location: ' . $url);
         exit;
     }
 
-    public static function escape(mixed $value): string {
+    public static function escape($value) {
         return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
     }
 }

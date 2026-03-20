@@ -15,18 +15,20 @@ class DataStore {
         $products = json_decode(file_get_contents($file), true) ?? [];
 
         if (!empty($filters['source'])) {
-            $products = array_filter($products, fn($p) => ($p['source'] ?? '') === $filters['source']);
+            $src = $filters['source'];
+            $products = array_filter($products, function($p) use ($src) { return ($p['source'] ?? '') === $src; });
         }
         if (!empty($filters['upload_status'])) {
-            $products = array_filter($products, fn($p) => ($p['upload_status'] ?? '') === $filters['upload_status']);
+            $us = $filters['upload_status'];
+            $products = array_filter($products, function($p) use ($us) { return ($p['upload_status'] ?? '') === $us; });
         }
         if (!empty($filters['search'])) {
             $q = strtolower($filters['search']);
-            $products = array_filter($products, fn($p) =>
-                str_contains(strtolower($p['product_name'] ?? ''), $q) ||
-                str_contains(strtolower($p['ean'] ?? ''), $q) ||
-                str_contains(strtolower($p['asin_de'] ?? ''), $q)
-            );
+            $products = array_filter($products, function($p) use ($q) {
+                return strpos(strtolower($p['product_name'] ?? ''), $q) !== false ||
+                       strpos(strtolower($p['ean'] ?? ''), $q) !== false ||
+                       strpos(strtolower($p['asin_de'] ?? ''), $q) !== false;
+            });
         }
 
         return array_values($products);
@@ -43,8 +45,8 @@ class DataStore {
     public static function getProductCount(): array {
         $products = static::getProducts();
         $total      = count($products);
-        $withAsin   = count(array_filter($products, fn($p) => !empty($p['asin_de'])));
-        $notUploaded= count(array_filter($products, fn($p) => ($p['upload_status'] ?? '') === 'NOT_UPLOADED'));
+        $withAsin   = count(array_filter($products, function($p) { return !empty($p['asin_de']); }));
+        $notUploaded= count(array_filter($products, function($p) { return ($p['upload_status'] ?? '') === 'NOT_UPLOADED'; }));
         $suppliers  = count(array_unique(array_column($products, 'source')));
         return compact('total', 'withAsin', 'notUploaded', 'suppliers');
     }

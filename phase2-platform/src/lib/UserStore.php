@@ -23,9 +23,9 @@
  */
 class UserStore {
 
-    private static string $file = '';
+    private static $file = '';
 
-    private static function file(): string {
+    private static function file() {
         if (!static::$file) {
             static::$file = DATA_DIR . '/users.json';
         }
@@ -180,7 +180,7 @@ class UserStore {
     }
 
     // ── Helpers ───────────────────────────────────────────────
-    private static function updateField(string $email, string $field, mixed $value): void {
+    private static function updateField($email, $field, $value) {
         $users = static::all();
         foreach ($users as &$u) {
             if (strtolower($u['email']) === strtolower($email)) {
@@ -192,14 +192,14 @@ class UserStore {
     }
 
     public static function count(): int {
-        return count(array_filter(static::all(), fn($u) => $u['verified']));
+        return count(array_filter(static::all(), function($u) { return !empty($u['verified']); }));
     }
 
     // ── Delete ────────────────────────────────────────────────
     public static function deleteByEmail(string $email): bool {
         $users = static::all();
         $before = count($users);
-        $users  = array_values(array_filter($users, fn($u) => strtolower($u['email']) !== strtolower($email)));
+        $users  = array_values(array_filter($users, function($u) use ($email) { return strtolower($u['email']) !== strtolower($email); }));
         if (count($users) === $before) return false;
         static::save($users);
         return true;

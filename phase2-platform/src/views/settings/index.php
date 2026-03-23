@@ -112,6 +112,24 @@ $flags = ['DE'=>'🇩🇪','FR'=>'🇫🇷','IT'=>'🇮🇹','ES'=>'🇪🇸','N
 
 </form>
 
+<!-- SMTP test -->
+<div class="card mt-16" style="border-color:rgba(201,168,76,0.2)">
+  <div class="card-title">Тест на имейл (SMTP)</div>
+  <div class="text-sm text-muted" style="margin-bottom:14px;line-height:1.7">
+    Изпрати тестов имейл за да провериш дали Gmail App Password е верен.<br>
+    Ако не получиш имейл — провери <code style="color:var(--gold)">SMTP_PASS</code> в <code style="color:var(--gold)">.env</code>.
+  </div>
+  <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+    <input type="email" id="test-email-to" class="form-control"
+           style="max-width:260px" placeholder="you@example.com"
+           value="<?= htmlspecialchars(Auth::user() ?? '') ?>">
+    <button type="button" class="btn btn-ghost" onclick="sendTestEmail()">
+      Изпрати тест →
+    </button>
+    <span id="test-email-status" class="text-sm" style="display:none"></span>
+  </div>
+</div>
+
 <!-- Password change hint -->
 <div class="card mt-16" style="border-color:rgba(201,168,76,0.2)">
   <div class="card-title">Смяна на парола</div>
@@ -122,3 +140,31 @@ $flags = ['DE'=>'🇩🇪','FR'=>'🇫🇷','IT'=>'🇮🇹','ES'=>'🇪🇸','N
     </code>
   </div>
 </div>
+
+<script>
+function sendTestEmail() {
+  const to  = document.getElementById('test-email-to').value.trim();
+  const st  = document.getElementById('test-email-status');
+  if (!to) { st.textContent = 'Въведи имейл адрес'; st.style.color='var(--red,#E05C5C)'; st.style.display='inline'; return; }
+
+  st.textContent = 'Изпращане…';
+  st.style.color = 'var(--muted)';
+  st.style.display = 'inline';
+
+  const fd = new FormData();
+  fd.append('to', to);
+
+  fetch('/api/test-email', { method:'POST', body: fd })
+    .then(r => r.json())
+    .then(d => {
+      if (d.success) {
+        st.textContent = '✓ ' + (d.message || 'Изпратен!');
+        st.style.color = '#5DCCA0';
+      } else {
+        st.textContent = '✗ ' + (d.error || 'Грешка');
+        st.style.color = '#E05C5C';
+      }
+    })
+    .catch(() => { st.textContent = '✗ Мрежова грешка'; st.style.color='#E05C5C'; });
+}
+</script>

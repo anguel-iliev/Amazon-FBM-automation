@@ -1,64 +1,104 @@
 <?php
 class ProductsController {
-    public function index(): void {
+
+    // Allowed editable fields (whitelist for security)
+    private static $editableFields = [
+        'Корекция  на цена',
+        'Коментар',
+        'Продажна Цена в Амазон  - Brutto',
+        'Цена Доставчик -Netto',
+        'Транспорт до кр. лиент  Netto',
+        'Намерена 2ра обява',
+        'DM цена',
+        'Нова цена след намаление',
+        'За следваща поръчка',
+        'Електоника',
+    ];
+
+    public function index() {
         require_once SRC . '/lib/DataStore.php';
 
-        $filter = $_GET['filter'] ?? '';
-        $search = $_GET['search'] ?? '';
-        $source = $_GET['source'] ?? '';
+        // Per-page
+        $validPP = [25, 50, 100, 250];
+        $perPage = (int)($_GET['perpage'] ?? 50);
+        if (!in_array($perPage, $validPP)) $perPage = 50;
 
+        $page    = max(1, (int)($_GET['page'] ?? 1));
+
+        // Filters
         $filters = [];
-        if ($filter === 'not_uploaded') $filters['upload_status'] = 'NOT_UPLOADED';
-        if ($search) $filters['search'] = $search;
-        if ($source) $filters['source'] = $source;
+        if (!empty($_GET['dostavchik']))    $filters['dostavchik']    = $_GET['dostavchik'];
+        if (!empty($_GET['brand']))         $filters['brand']         = $_GET['brand'];
+        if (!empty($_GET['upload_status'])) $filters['upload_status'] = $_GET['upload_status'];
+        if (!empty($_GET['elektronika']))   $filters['elektronika']   = $_GET['elektronika'];
+        if (!empty($_GET['search']))        $filters['search']        = $_GET['search'];
 
-        $products  = DataStore::getProducts($filters);
-        $allSources= array_unique(array_column(DataStore::getProducts(), 'source'));
-        sort($allSources);
+        $all = DataStore::getProducts($filters);
+
+        // ── Sorting ────────────────────────────────────────────────
+        $sortCol = $_GET['sort'] ?? '';
+        $sortDir = ($_GET['dir'] ?? 'asc') === 'desc' ? 'desc' : 'asc';
+        if ($sortCol) {
+            usort($all, function($a, $b) use ($sortCol, $sortDir) {
+                $va = $a[$sortCol] ?? '';
+                $vb = $b[$sortCol] ?? '';
+                // Numeric sort
+                if (is_numeric($va) && is_numeric($vb)) {
+                    $cmp = (float)$va <=> (float)$vb;
+                } else {
+                    $cmp = strcmp((string)$va, (string)$vb);
+                }
+                return $sortDir === 'desc' ? -$cmp : $cmp;
+            });
+        }
+
+        $total    = count($all);
+        $products = array_slice($all, ($page - 1) * $perPage, $perPage);
+        $pages    = max(1, (int)ceil($total / $perPage));
 
         View::renderWithLayout('products/index', [
             'pageTitle'  => 'Продукти',
             'activePage' => 'products',
             'products'   => $products,
-            'allSources' => $allSources,
-            'filter'     => $filter,
-            'search'     => $search,
-            'source'     => $source,
-            'total'      => count($products),
+            'total'      => $total,
+            'page'       => $page,
+            'pages'      => $pages,
+            'perPage'    => $perPage,
+            'filters'    => $filters,
+            'suppliers'  => DataStore::getDistinctValues('Доставчик'),
+            'brands'     => DataStore::getDistinctValues('Бранд'),
+            'columns'    => DataStore::getColumns(),
         ]);
     }
 
-    public function search(): void {
+    public function search() {
         require_once SRC . '/lib/DataStore.php';
-        $q = $_GET['q'] ?? '';
-        $products = DataStore::getProducts(['search' => $q]);
-        View::json(['products' => array_slice($products, 0, 50)]);
+        $filters = [];
+        if (!empty($_GET['search']))     $filters['search']     = $_GET['search'];
+        if (!empty($_GET['dostavchik'])) $filters['dostavchik'] = $_GET['dostavchik'];
+        if (!empty($_GET['brand']))      $filters['brand']      = $_GET['brand'];
+        $products = array_slice(DataStore::getProducts($filters), 0, 100);
+        View::json(['products' => $products, 'total' => count($products)]);
     }
 
-    public function update(): void {
+    public function update() {
         require_once SRC . '/lib/DataStore.php';
-        $id     = $_POST['id'] ?? '';
-        $field  = $_POST['field'] ?? '';
-        $value  = $_POST['value'] ?? '';
 
-        // Validate allowed fields
-        $allowed = ['asin_de', 'asin_fr', 'asin_it', 'asin_es', 'asin_nl', 'upload_status', 'notes'];
-        if (!in_array($field, $allowed)) {
-            View::json(['error' => 'Field not allowed'], 400);
+        $ean   = trim($_POST['ean']   ?? '');
+        $field = trim($_POST['field'] ?? '');
+        $value = trim($_POST['value'] ?? '');
+
+        if (!$ean || !$field) {
+            View::json(['success' => false, 'error' => 'Missing params'], 400);
+            return;
+        }
+        // Security: only allow whitelisted fields
+        if (!in_array($field, static::$editableFields)) {
+            View::json(['success' => false, 'error' => 'Field not editable'], 403);
             return;
         }
 
-        // TODO: update in Google Sheets via Python script
-        // For now: update local cache
-        $products = DataStore::getProducts();
-        foreach ($products as &$p) {
-            if (($p['ean'] ?? '') === $id || ($p['our_sku'] ?? '') === $id) {
-                $p[$field] = $value;
-                break;
-            }
-        }
-        DataStore::saveProductsCache($products);
-        Logger::info("Product updated: {$id} {$field}={$value}");
-        View::json(['success' => true]);
+        $ok = DataStore::updateProduct($ean, $field, $value);
+        View::json(['success' => $ok]);
     }
 }

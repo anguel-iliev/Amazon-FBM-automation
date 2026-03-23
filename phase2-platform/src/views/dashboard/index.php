@@ -107,26 +107,26 @@ $suppliers    = $s['suppliers']     ?? 0;
       <tbody>
         <?php foreach ($recent as $p): ?>
         <tr>
-          <td class="text-muted text-sm"><?= htmlspecialchars($p['ean'] ?? '—') ?></td>
+          <td class="text-muted text-sm"><?= htmlspecialchars($p['EAN Amazon'] ?? '—') ?></td>
           <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
-            <?= htmlspecialchars($p['product_name'] ?? '—') ?>
+            <?= htmlspecialchars($p['Модел'] ?? '—') ?>
           </td>
-          <td><span class="badge badge-muted"><?= htmlspecialchars($p['source'] ?? '—') ?></span></td>
-          <td class="font-head"><?= number_format((float)($p['supplier_price'] ?? 0), 2) ?></td>
+          <td><span class="badge badge-muted"><?= htmlspecialchars($p['Доставчик'] ?? '—') ?></span></td>
+          <td class="font-head"><?= number_format((float)($p['Цена Доставчик -Netto'] ?? 0), 2) ?></td>
           <td>
-            <?php $change = $p['price_change'] ?? 'SAME'; ?>
-            <?php if ($change === 'UP'): ?>
-            <span class="price-up text-sm">↑ UP</span>
-            <?php elseif ($change === 'DOWN'): ?>
-            <span class="price-down text-sm">↓ DOWN</span>
+            <?php $res = (float)($p['Резултат'] ?? 0); ?>
+            <?php if ($res > 0): ?>
+            <span class="price-down text-sm">+<?= number_format($res,2) ?></span>
+            <?php elseif ($res < 0): ?>
+            <span class="price-up text-sm"><?= number_format($res,2) ?></span>
             <?php else: ?>
             <span class="text-muted text-sm">—</span>
             <?php endif; ?>
           </td>
           <td>
-            <?php $status = $p['upload_status'] ?? 'NOT_UPLOADED'; ?>
+            <?php $status = $p['_upload_status'] ?? 'NOT_UPLOADED'; ?>
             <span class="badge <?= $status === 'UPLOADED' ? 'badge-green' : 'badge-gold' ?>">
-              <?= $status ?>
+              <?= $status === 'UPLOADED' ? 'Качен' : 'За качване' ?>
             </span>
           </td>
         </tr>

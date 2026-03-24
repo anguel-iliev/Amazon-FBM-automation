@@ -223,17 +223,23 @@ class ProductsController {
             }
             $mode  = $_POST['mode']  ?? 'merge';
             $label = trim($_POST['label'] ?? '');
-            if ($mode === 'replace') {
+            if ($mode === 'first') {
+                // Първоначален импорт — без архив, без изтриване
+                $cnt    = count($parsed['products']);
+                $result = Firebase::firstImport($parsed['products']);
+                if (!$result['ok']) {
+                    echo json_encode(['success'=>false,'error'=>$result['error']??'Firebase грешка','written'=>$result['written']??0,'total'=>$cnt]);
+                    return;
+                }
+                Firebase::appendLog(['type'=>'import_first','count'=>$result['written']]);
+                echo json_encode(['success'=>true,'mode'=>'first','count'=>$result['written'],
+                    'message'=>"Първоначален импорт: {$result['written']} продукта записани в Firebase."]);
+            } elseif ($mode === 'replace') {
                 $cnt        = count($parsed['products']);
                 $archiveKey = Firebase::archiveCurrent($label ?: 'Преди импорт '.date('d.m.Y H:i'));
                 $result     = Firebase::putProducts($parsed['products']);
                 if (!$result['ok']) {
-                    echo json_encode([
-                        'success' => false,
-                        'error'   => $result['error'] ?? 'Firebase грешка при запис',
-                        'written' => $result['written'] ?? 0,
-                        'total'   => $cnt,
-                    ]);
+                    echo json_encode(['success'=>false,'error'=>$result['error']??'Firebase грешка','written'=>$result['written']??0,'total'=>$cnt]);
                     return;
                 }
                 Firebase::appendLog(['type'=>'import_replace','count'=>$result['written']]);

@@ -2,6 +2,7 @@
 $markets = $marketplaces ?? [];
 $codes = ['DE','FR','IT','ES','NL','PL','SE'];
 $flags = ['DE'=>'🇩🇪','FR'=>'🇫🇷','IT'=>'🇮🇹','ES'=>'🇪🇸','NL'=>'🇳🇱','PL'=>'🇵🇱','SE'=>'🇸🇪'];
+$names = ['DE'=>'Germany','FR'=>'France','IT'=>'Italy','ES'=>'Spain','NL'=>'Netherlands','PL'=>'Poland','SE'=>'Sweden'];
 ?>
 
 <div class="grid-2" style="align-items:start">
@@ -18,10 +19,10 @@ $flags = ['DE'=>'🇩🇪','FR'=>'🇫🇷','IT'=>'🇮🇹','ES'=>'🇪🇸','N
       <div style="display:flex;flex-wrap:wrap;gap:8px">
         <?php foreach ($codes as $code): ?>
         <?php $cfg = $markets[$code] ?? []; ?>
-        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:6px 10px;border:1px solid var(--border);border-radius:4px;font-size:13px">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:6px 12px;border:1px solid var(--border2);border-radius:6px;font-size:14px;background:var(--bg3);transition:background .15s">
           <input type="checkbox" name="markets[]" value="<?= $code ?>"
             <?= ($cfg['active'] ?? false) ? 'checked' : '' ?>>
-          <?= $flags[$code] ?? '' ?> <?= $code ?>
+          <span style="font-size:18px"><?= $flags[$code] ?? '' ?></span>
         </label>
         <?php endforeach; ?>
       </div>
@@ -42,7 +43,7 @@ $flags = ['DE'=>'🇩🇪','FR'=>'🇫🇷','IT'=>'🇮🇹','ES'=>'🇪🇸','N
 <div class="card mt-16">
   <div class="flex-between mb-16">
     <div class="card-title" style="margin:0">Настройки по пазари</div>
-    <a href="/settings" class="btn btn-ghost btn-sm">Редактирай →</a>
+    <a href="/settings/vat" class="btn btn-ghost btn-sm">Редактирай →</a>
   </div>
   <div class="table-wrap">
     <table>
@@ -53,7 +54,10 @@ $flags = ['DE'=>'🇩🇪','FR'=>'🇫🇷','IT'=>'🇮🇹','ES'=>'🇪🇸','N
         <?php foreach ($codes as $code): ?>
         <?php $cfg = $markets[$code] ?? []; ?>
         <tr>
-          <td><strong><?= $flags[$code] ?? '' ?> <?= $code ?></strong></td>
+          <td>
+            <span style="font-size:18px;margin-right:8px"><?= $flags[$code] ?? '' ?></span>
+            <strong style="font-size:13px"><?= $names[$code] ?? $code ?></strong>
+          </td>
           <td><?= round(($cfg['vat'] ?? 0) * 100, 0) ?>%</td>
           <td><?= round(($cfg['amazon_fee'] ?? 0) * 100, 0) ?>%</td>
           <td><?= number_format($cfg['shipping'] ?? 0, 2) ?></td>
@@ -72,6 +76,7 @@ $flags = ['DE'=>'🇩🇪','FR'=>'🇫🇷','IT'=>'🇮🇹','ES'=>'🇪🇸','N
 
 <script>
 const flags = <?= json_encode($flags) ?>;
+const names = <?= json_encode($names) ?>;
 
 async function calcPrices() {
   const price = parseFloat(document.getElementById('calc-price').value);
@@ -99,12 +104,15 @@ async function calcPrices() {
   for (const [code, r] of Object.entries(results)) {
     const viable = r.viable;
     html += `
-      <div style="padding:12px;background:var(--bg3);border-radius:4px;border:1px solid var(--border)">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-          <strong>${flags[code] || ''} ${code}</strong>
-          <span style="font-family:var(--font-head);font-size:20px;font-weight:800;color:var(--gold)">${r.final.toFixed(2)} €</span>
+      <div style="padding:14px;background:var(--bg3);border-radius:6px;border:1px solid ${viable ? 'rgba(61,187,127,0.2)' : 'var(--border)'}">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="font-size:20px">${flags[code] || ''}</span>
+            <strong style="font-size:14px">${names[code] || code}</strong>
+          </div>
+          <span style="font-family:var(--font-head);font-size:22px;font-weight:800;color:var(--gold)">${r.final.toFixed(2)} €</span>
         </div>
-        <div style="display:flex;gap:16px;font-size:12px;color:var(--muted)">
+        <div style="display:flex;gap:16px;font-size:12px;color:rgba(255,255,255,0.5)">
           <span>Марж: <strong style="color:${viable ? 'var(--green)' : 'var(--red)'}">${r.margin_pct}%</strong></span>
           <span>Amazon: ${r.breakdown.amazon_fee.toFixed(2)} €</span>
           <span>ДДС: ${r.breakdown.vat.toFixed(2)} €</span>

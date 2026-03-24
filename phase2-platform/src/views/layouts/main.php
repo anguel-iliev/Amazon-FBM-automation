@@ -5,14 +5,15 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title><?= htmlspecialchars($pageTitle ?? 'Dashboard') ?> — AMZ Retail</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/assets/css/app.css">
+
 </head>
 <body>
 
 <div class="layout">
 
-  <!-- Sidebar -->
+  <!-- ══ Left Sidebar ══════════════════════════════════════════════ -->
   <nav class="sidebar">
     <div class="sidebar-header">
       <div class="sidebar-logo">AMZ<span>Retail</span></div>
@@ -35,6 +36,12 @@
           <?php endif; ?>
         </a>
       </li>
+      <li class="nav-item <?= ($activePage ?? '') === 'suppliers' ? 'active' : '' ?>">
+        <a href="/suppliers" class="nav-link">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="none"><path d="M3 17v-1a5 5 0 0 1 5-5h4a5 5 0 0 1 5 5v1" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="10" cy="7" r="4" stroke="currentColor" stroke-width="1.8"/></svg>
+          <span>Доставчици</span>
+        </a>
+      </li>
       <li class="nav-item <?= ($activePage ?? '') === 'sync' ? 'active' : '' ?>">
         <a href="/sync" class="nav-link">
           <svg class="nav-icon" viewBox="0 0 20 20" fill="none"><path d="M4 10a6 6 0 0 1 6-6 6 6 0 0 1 4.24 1.76M16 10a6 6 0 0 1-6 6 6 6 0 0 1-4.24-1.76" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M14.24 4.76 16 3v3.5h-3.5M5.76 15.24 4 17v-3.5h3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -48,11 +55,30 @@
         </a>
       </li>
       <li class="nav-divider"></li>
-      <li class="nav-item <?= ($activePage ?? '') === 'settings' ? 'active' : '' ?>">
-        <a href="/settings" class="nav-link">
+      <!-- Settings with submenu -->
+      <li class="nav-item <?= in_array($activePage ?? '', ['settings','settings-vat','settings-prices','settings-integrations','settings-system','settings-formulas']) ? 'active open' : '' ?>" id="nav-settings">
+        <button class="nav-link" onclick="toggleNav('nav-settings')">
           <svg class="nav-icon" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="2.5" stroke="currentColor" stroke-width="1.8"/><path d="M10 2v2M10 16v2M2 10h2M16 10h2M4.22 4.22l1.42 1.42M14.36 14.36l1.42 1.42M4.22 15.78l1.42-1.42M14.36 5.64l1.42-1.42" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
           <span>Настройки</span>
-        </a>
+          <svg class="nav-arrow" viewBox="0 0 20 20" fill="none"><path d="M7 9l3 3 3-3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <ul class="nav-submenu">
+          <li class="<?= ($activePage ?? '') === 'settings-vat' ? 'active' : '' ?>">
+            <a href="/settings/vat">ДДС по пазари</a>
+          </li>
+          <li class="<?= ($activePage ?? '') === 'settings-prices' ? 'active' : '' ?>">
+            <a href="/settings/prices">Редакция Цени</a>
+          </li>
+          <li class="<?= ($activePage ?? '') === 'settings-formulas' ? 'active' : '' ?>">
+            <a href="/settings/formulas">Формули</a>
+          </li>
+          <li class="<?= ($activePage ?? '') === 'settings-integrations' ? 'active' : '' ?>">
+            <a href="/settings/integrations">Интеграции</a>
+          </li>
+          <li class="<?= ($activePage ?? '') === 'settings-system' ? 'active' : '' ?>">
+            <a href="/settings/system">Системни</a>
+          </li>
+        </ul>
       </li>
     </ul>
 
@@ -61,13 +87,12 @@
         <div class="user-avatar"><?= strtoupper(substr(Auth::user() ?? 'A', 0, 1)) ?></div>
         <div class="user-details">
           <div class="user-name"><?= htmlspecialchars(Auth::user() ?? '') ?></div>
-          <div class="user-role">Administrator</div>
+          <div class="user-role"><?= Auth::isAdmin() ? 'Administrator' : 'User' ?></div>
         </div>
       </div>
       <?php if (Auth::isAdmin()): ?>
-      <a href="/invite" style="display:flex;align-items:center;gap:8px;padding:7px 16px;margin:0 8px 8px;border-radius:4px;color:var(--muted);text-decoration:none;font-size:13px;font-weight:500;transition:color 0.15s,background 0.15s" onmouseover="this.style.color='var(--text)';this.style.background='rgba(255,255,255,0.05)'" onmouseout="this.style.color='var(--muted)';this.style.background=''">
+      <a href="/invite" title="Покани потребител" style="padding:6px;color:rgba(255,255,255,0.4);display:flex;align-items:center;border-radius:4px;transition:color .15s,background .15s" onmouseover="this.style.color='#fff';this.style.background='rgba(255,255,255,0.06)'" onmouseout="this.style.color='rgba(255,255,255,0.4)';this.style.background=''">
         <svg width="15" height="15" viewBox="0 0 20 20" fill="none"><path d="M14 11c2.2 0 4 1.8 4 4v1M1 16v-1c0-2.2 1.8-4 4-4M10 10a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM16 8v4M18 10h-4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
-        Покани потребител
       </a>
       <?php endif; ?>
       <a href="/logout" class="btn-logout" title="Изход">
@@ -76,28 +101,38 @@
     </div>
   </nav>
 
-  <!-- Main content -->
-  <main class="main">
-    <div class="topbar">
-      <div class="page-title"><?= htmlspecialchars($pageTitle ?? 'Dashboard') ?></div>
-      <div class="topbar-right">
-        <?php $flash = Session::getFlash('success'); if ($flash): ?>
-        <div class="flash flash-success"><?= htmlspecialchars($flash) ?></div>
-        <?php endif; ?>
-        <?php $flash = Session::getFlash('error'); if ($flash): ?>
-        <div class="flash flash-error"><?= htmlspecialchars($flash) ?></div>
-        <?php endif; ?>
-        <div class="topbar-time" id="clock"></div>
+  <!-- ══ Main content area ══════════════════════════════════════════ -->
+  <div style="flex:1;display:flex;flex-direction:column;overflow:hidden;">
+
+    <!-- ── Center main ── -->
+    <main class="main">
+      <div class="topbar">
+        <div class="page-title"><?= htmlspecialchars($pageTitle ?? 'Dashboard') ?></div>
+        <div class="topbar-right">
+          <?php $flash = Session::getFlash('success'); if ($flash): ?>
+          <div class="flash flash-success"><?= htmlspecialchars($flash) ?></div>
+          <?php endif; ?>
+          <?php $flash = Session::getFlash('error'); if ($flash): ?>
+          <div class="flash flash-error"><?= htmlspecialchars($flash) ?></div>
+          <?php endif; ?>
+          <div class="topbar-time" id="clock"></div>
+        </div>
       </div>
-    </div>
 
-    <div class="page-content">
-      <?= $content ?? '' ?>
-    </div>
-  </main>
-
+      <div class="page-content <?= ($activePage ?? '') === 'products' ? 'no-pad' : '' ?>">
+        <?= $content ?? '' ?>
+      </div>
+    </main>
 </div>
 
+</div><!-- /.layout -->
+
 <script src="/assets/js/app.js"></script>
+<script>
+function toggleNav(id) {
+  const el = document.getElementById(id);
+  if (el) el.classList.toggle('open');
+}
+</script>
 </body>
 </html>

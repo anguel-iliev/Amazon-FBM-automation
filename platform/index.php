@@ -64,6 +64,7 @@ $router->add('POST', '/products/import',         'ProductsController',  'importA
 $router->add('POST', '/products/restore',        'ProductsController',  'restoreArchive');
 $router->add('GET',  '/products/export',         'ProductsController',  'export');
 $router->add('GET',  '/products/template',       'ProductsController',  'template');
+$router->add('POST', '/products/debug-import',    'ProductsController',  'debugImport');
 
 // Other modules
 $router->add('GET',  '/sync',                    'SyncController',      'index');

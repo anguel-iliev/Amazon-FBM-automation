@@ -1,62 +1,23 @@
 <?php
 class PricingController {
-    public function index() {
-        require_once SRC . '/lib/DataStore.php';
-        $settings = DataStore::getSettings();
-
-        View::renderWithLayout('pricing/index', [
-            'pageTitle'    => 'Ценообразуване',
-            'activePage'   => 'pricing',
-            'settings'     => $settings,
-            'marketplaces' => $settings['marketplaces'] ?? [],
-        ]);
+    public function index(): void {
+        $settings = Settings::get();
+        View::renderWithLayout('pricing/index', ['pageTitle'=>'Ценообразуване','activePage'=>'pricing','settings'=>$settings,'marketplaces'=>$settings['marketplaces']??[]]);
     }
-
-    public function calculate() {
-        $price   = (float)($_POST['price'] ?? 0);
-        $markets = $_POST['markets'] ?? [];
-
-        require_once SRC . '/lib/DataStore.php';
-        $settings = DataStore::getSettings();
-        $results  = [];
-
-        foreach ($settings['marketplaces'] as $code => $cfg) {
-            if (!empty($markets) && !in_array($code, $markets)) continue;
-            $results[$code] = $this->calcPrice($price, $cfg);
+    public function calculate(): void {
+        $price   = (float)($_POST['price']??0);
+        $markets = $_POST['markets']??[];
+        $settings= Settings::get();
+        $results = [];
+        foreach ($markets as $code) {
+            $m = $settings['marketplaces'][$code] ?? null;
+            if (!$m) continue;
+            $sellPrice = $price * (1 + ($m['vat']??0.19));
+            $fee       = $sellPrice * ($m['amazon_fee']??0.15);
+            $shipping  = $m['shipping']??4.50;
+            $rezultat  = $sellPrice - $fee - $shipping - $price;
+            $results[$code] = ['sell_price'=>round($sellPrice,2),'fee'=>round($fee,2),'shipping'=>round($shipping,2),'rezultat'=>round($rezultat,2),'margin'=>$price>0?round($rezultat/$price*100,1):0];
         }
-
-        View::json(['results' => $results]);
-    }
-
-    private function calcPrice($supplierPrice, $cfg) {
-        $vat      = (float)($cfg['vat']        ?? 0.19);
-        $amzFee   = (float)($cfg['amazon_fee'] ?? 0.15);
-        $shipping = (float)($cfg['shipping']   ?? 4.50);
-        $fbmFee   = (float)($cfg['fbm_fee']    ?? 1.00);
-
-        $base      = $supplierPrice + $shipping;
-        $beforeVat = $base / (1 - $amzFee);
-        $final     = $beforeVat * (1 + $vat) + $fbmFee;
-
-        // Round to .99
-        $final = floor($final) + 0.99;
-        if ($final - $supplierPrice < 0) $final = round($supplierPrice * 2.5, 2);
-
-        $margin    = $final - $base - ($final * $amzFee) - $fbmFee;
-        $marginPct = $final > 0 ? round($margin / $final * 100, 1) : 0;
-
-        return [
-            'final'      => round($final, 2),
-            'margin'     => round($margin, 2),
-            'margin_pct' => $marginPct,
-            'viable'     => $marginPct >= 10,
-            'breakdown'  => [
-                'supplier'   => $supplierPrice,
-                'shipping'   => $shipping,
-                'amazon_fee' => round($final * $amzFee, 2),
-                'vat'        => round($beforeVat * $vat, 2),
-                'fbm_fee'    => $fbmFee,
-            ],
-        ];
+        View::json(['success'=>true,'results'=>$results]);
     }
 }

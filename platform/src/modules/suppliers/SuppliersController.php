@@ -1,111 +1,45 @@
 <?php
 class SuppliersController {
-    public function index() {
-        require_once SRC . '/lib/DataStore.php';
 
-        // Load suppliers list
-        $suppliers = DataStore::getSuppliers();
-
-        // Enrich with product count per supplier
-        $products  = DataStore::getProducts();
-        $counts    = [];
-        foreach ($products as $p) {
-            $src = $p['source'] ?? '';
-            if ($src) $counts[$src] = ($counts[$src] ?? 0) + 1;
-        }
-        foreach ($suppliers as &$sup) {
-            $sup['product_count'] = $counts[$sup['name'] ?? ''] ?? 0;
-        }
-        unset($sup);
-
-        View::renderWithLayout('suppliers/index', [
-            'pageTitle'    => 'Доставчици',
-            'activePage'   => 'suppliers',
-            'supplierList' => $suppliers,
-        ]);
-    }
-
-    public function save() {
-        require_once SRC . '/lib/DataStore.php';
-
-        $data = json_decode(file_get_contents('php://input'), true) ?? [];
-
-        $name = trim($data['name'] ?? '');
-        if (!$name) {
-            View::json(['success' => false, 'error' => 'Името е задължително'], 400);
-            return;
-        }
-
-        $suppliers = DataStore::getSuppliers();
-        $id = $data['id'] ?? '';
-
-        if ($id) {
-            // Update existing
-            $found = false;
-            foreach ($suppliers as &$sup) {
-                if ($sup['id'] == $id) {
-                    $sup = array_merge($sup, [
-                        'name'          => $name,
-                        'email'         => trim($data['email'] ?? ''),
-                        'phone'         => trim($data['phone'] ?? ''),
-                        'website'       => trim($data['website'] ?? ''),
-                        'currency'      => trim($data['currency'] ?? 'EUR'),
-                        'payment_terms' => trim($data['payment_terms'] ?? ''),
-                        'min_order'     => (float)($data['min_order'] ?? 0),
-                        'notes'         => trim($data['notes'] ?? ''),
-                        'active'        => (bool)($data['active'] ?? true),
-                        'updated_at'    => date('Y-m-d H:i:s'),
-                    ]);
-                    $found = true;
-                    break;
-                }
-            }
+    public function index(): void {
+        $suppliers = $this->load();
+        try {
+            $products = Firebase::getProducts();
+            $counts   = [];
+            foreach ($products as $p) { $s=$p['Доставчик']??''; if($s) $counts[$s]=($counts[$s]??0)+1; }
+            foreach ($suppliers as &$sup) { $sup['product_count'] = $counts[$sup['name']]??0; }
             unset($sup);
-            if (!$found) {
-                View::json(['success' => false, 'error' => 'Доставчикът не е намерен'], 404);
-                return;
-            }
-        } else {
-            // Create new
-            $suppliers[] = [
-                'id'            => uniqid('sup_'),
-                'name'          => $name,
-                'email'         => trim($data['email'] ?? ''),
-                'phone'         => trim($data['phone'] ?? ''),
-                'website'       => trim($data['website'] ?? ''),
-                'currency'      => trim($data['currency'] ?? 'EUR'),
-                'payment_terms' => trim($data['payment_terms'] ?? ''),
-                'min_order'     => (float)($data['min_order'] ?? 0),
-                'notes'         => trim($data['notes'] ?? ''),
-                'active'        => true,
-                'created_at'    => date('Y-m-d H:i:s'),
-                'updated_at'    => date('Y-m-d H:i:s'),
-            ];
-        }
-
-        DataStore::saveSuppliers($suppliers);
-        Logger::info("Supplier saved: {$name} by " . Auth::user());
-        View::json(['success' => true]);
+        } catch (\Throwable $e) {}
+        View::renderWithLayout('suppliers/index', ['pageTitle'=>'Доставчици','activePage'=>'suppliers','supplierList'=>$suppliers]);
     }
 
-    public function delete() {
-        require_once SRC . '/lib/DataStore.php';
+    public function save(): void {
+        $id=$_POST['id']??''; $name=trim($_POST['name']??'');
+        if (!$name) { View::json(['success'=>false,'error'=>'Името е задължително']); return; }
+        $list=$this->load(); $found=false;
+        foreach ($list as &$s) { if ($s['id']===$id) { $s=array_merge($s,['name'=>$name,'email'=>trim($_POST['email']??''),'phone'=>trim($_POST['phone']??''),'website'=>trim($_POST['website']??''),'notes'=>trim($_POST['notes']??''),'active'=>isset($_POST['active']),'updated_at'=>date('Y-m-d H:i:s')]); $found=true; break; } }
+        unset($s);
+        if (!$found) $list[]=['id'=>'sup_'.substr(md5($name.time()),0,8),'name'=>$name,'email'=>trim($_POST['email']??''),'phone'=>trim($_POST['phone']??''),'website'=>trim($_POST['website']??''),'notes'=>trim($_POST['notes']??''),'active'=>true,'currency'=>'EUR','payment_terms'=>'','min_order'=>0,'created_at'=>date('Y-m-d H:i:s'),'updated_at'=>date('Y-m-d H:i:s')];
+        $this->save_($list); View::json(['success'=>true]);
+    }
 
-        $data = json_decode(file_get_contents('php://input'), true) ?? [];
-        $id   = $data['id'] ?? '';
+    public function delete(): void {
+        $id=trim($_POST['id']??'');
+        if (!$id) { View::json(['success'=>false,'error'=>'Липсва ID']); return; }
+        $this->save_(array_values(array_filter($this->load(), fn($s)=>$s['id']!==$id)));
+        View::json(['success'=>true]);
+    }
 
-        if (!$id) {
-            View::json(['success' => false, 'error' => 'ID липсва'], 400);
-            return;
-        }
-
-        $suppliers = DataStore::getSuppliers();
-        $suppliers = array_values(array_filter($suppliers, function($s) use ($id) {
-            return $s['id'] !== $id;
-        }));
-
-        DataStore::saveSuppliers($suppliers);
-        Logger::info("Supplier deleted: {$id} by " . Auth::user());
-        View::json(['success' => true]);
+    private function load(): array {
+        $f=DATA_DIR.'/suppliers.json';
+        if (!file_exists($f)||empty($d=json_decode(file_get_contents($f),true))) return $this->seed();
+        return $d;
+    }
+    private function save_(array $list): void { file_put_contents(DATA_DIR.'/suppliers.json',json_encode(array_values($list),JSON_PRETTY_PRINT|JSON_UNESCAPED_UNICODE),LOCK_EX); }
+    private function seed(): array {
+        $names=['Agiva','Amperel','Argoprima','Axxon','Bebolino','Best whole sale company','Buldent','Comsed','Elle cosmetique','Fortuna','Giochi Giachi IT','Iventas','Makave','Orbico','Töpfer','Uvex','Yutika natural'];
+        $list=[];
+        foreach ($names as $n) $list[]=['id'=>'sup_'.substr(md5($n),0,8),'name'=>$n,'email'=>'','phone'=>'','website'=>'','notes'=>'','active'=>true,'currency'=>'EUR','payment_terms'=>'','min_order'=>0,'created_at'=>'2025-01-01','updated_at'=>date('Y-m-d')];
+        $this->save_($list); return $list;
     }
 }

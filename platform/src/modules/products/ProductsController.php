@@ -224,12 +224,22 @@ class ProductsController {
             $mode  = $_POST['mode']  ?? 'merge';
             $label = trim($_POST['label'] ?? '');
             if ($mode === 'replace') {
+                $cnt        = count($parsed['products']);
                 $archiveKey = Firebase::archiveCurrent($label ?: 'Преди импорт '.date('d.m.Y H:i'));
-                $ok  = Firebase::putProducts($parsed['products']);
-                $cnt = count($parsed['products']);
-                Firebase::appendLog(['type'=>'import_replace','count'=>$cnt]);
-                echo json_encode(['success'=>$ok,'mode'=>'replace','count'=>$cnt,'archive_key'=>$archiveKey,
-                    'message'=>"Заменени с {$cnt} продукта."]);
+                $result     = Firebase::putProducts($parsed['products']);
+                if (!$result['ok']) {
+                    echo json_encode([
+                        'success' => false,
+                        'error'   => $result['error'] ?? 'Firebase грешка при запис',
+                        'written' => $result['written'] ?? 0,
+                        'total'   => $cnt,
+                    ]);
+                    return;
+                }
+                Firebase::appendLog(['type'=>'import_replace','count'=>$result['written']]);
+                echo json_encode(['success'=>true,'mode'=>'replace','count'=>$result['written'],
+                    'archive_key'=>$archiveKey,
+                    'message'=>"Заменени с {$result['written']} продукта."]);
             } else {
                 $result = Firebase::mergeProducts($parsed['products']);
                 Firebase::appendLog(['type'=>'import_merge','added'=>$result['added'],'skipped'=>$result['skipped']]);
@@ -304,3 +314,21 @@ class ProductsController {
         fclose($out); exit;
     }
 }
+
+    // ── Debug import ──────────────────────────────────────────
+    public function debugImport(): void {
+        header('Content-Type: application/json; charset=utf-8');
+        if (empty($_FILES['file']['tmp_name'])) { echo json_encode(['error'=>'No file']); return; }
+        $tmp = $_FILES['file']['tmp_name'];
+        $parsed = XlsxParser::parse($tmp);
+        if (empty($parsed['products'])) { echo json_encode(['error'=>'Parse failed','errors'=>$parsed['errors']]); return; }
+        $first3 = array_slice($parsed['products'], 0, 3);
+        // Test JSON encode
+        $json = json_encode($first3, JSON_UNESCAPED_UNICODE);
+        $keys = [];
+        foreach ($first3 as $p) {
+            $ean = Firebase::sanitizeKey($p['EAN Amazon']??'');
+            $keys[] = ['raw'=>$p['EAN Amazon']??'', 'sanitized'=>$ean, 'json_ok'=>json_encode([$ean=>['test'=>'val']]) !== false];
+        }
+        echo json_encode(['count'=>count($parsed['products']),'first3_keys'=>$keys,'json_ok'=>$json!==false,'json_error'=>json_last_error_msg(),'columns'=>$parsed['columns']??[]]);
+    }

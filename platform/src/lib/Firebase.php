@@ -27,6 +27,28 @@ class Firebase {
     private static function invalidateCache(): void { static::$cache = null; }
 
     // ── HTTP (cURL) ───────────────────────────────────────────
+    /**
+     * Sanitize a product array: ensure all values are valid UTF-8 strings,
+     * and the EAN key is a valid Firebase key.
+     */
+    private static function cleanProduct(array $p): array {
+        $clean = [];
+        foreach ($p as $k => $v) {
+            // Ensure keys are strings
+            $k = (string)$k;
+            // Ensure values are valid UTF-8 strings
+            if (is_string($v)) {
+                $v = mb_convert_encoding($v, 'UTF-8', 'UTF-8');
+            } elseif (is_float($v) || is_int($v)) {
+                $v = (string)$v;
+            } elseif (is_null($v)) {
+                $v = '';
+            }
+            $clean[$k] = $v;
+        }
+        return $clean;
+    }
+
     private static function request(string $method, string $path, mixed $data = null): array {
         if (!static::isReady()) {
             return ['ok' => false, 'error' => 'Firebase not configured — провери .env файла', 'data' => null];
@@ -160,14 +182,23 @@ class Firebase {
         // Build sanitized map
         $data = [];
         foreach ($products as $p) {
-            $ean = static::sanitizeKey($p['EAN Amazon'] ?? '');
+            $eanRaw = trim((string)($p['EAN Amazon'] ?? ''));
+            $ean    = static::sanitizeKey($eanRaw);
             if ($ean === '') continue;
             $p['_upload_status'] = $p['_upload_status'] ?? 'NOT_UPLOADED';
-            $data[$ean] = $p;
+            // Ensure EAN Amazon field also has the clean string value
+            $p['EAN Amazon'] = $eanRaw;
+            $data[$ean] = static::cleanProduct($p);
         }
 
         if (empty($data)) {
-            return ['ok' => false, 'error' => 'Няма валидни продукти (всички EAN са празни)', 'written' => 0];
+            return ['ok' => false, 'error' => 'Няма валидни продукти (всички EAN са празни или нечетими)', 'written' => 0];
+        }
+
+        // Validate JSON before sending
+        $testJson = json_encode(array_slice($data, 0, 1, true), JSON_UNESCAPED_UNICODE);
+        if ($testJson === false) {
+            return ['ok' => false, 'error' => 'JSON encode грешка: ' . json_last_error_msg(), 'written' => 0];
         }
 
         // DELETE existing
@@ -212,7 +243,7 @@ class Firebase {
             $ean = static::sanitizeKey($p['EAN Amazon'] ?? '');
             if ($ean === '') continue;
             if (isset($existing[$ean])) { $skipped++; }
-            else { $p['_upload_status'] = 'NOT_UPLOADED'; $patch[$ean] = $p; $added++; }
+            else { $p['_upload_status'] = 'NOT_UPLOADED'; $patch[$ean] = static::cleanProduct($p); $added++; }
         }
 
         if (!empty($patch)) {
@@ -310,7 +341,24 @@ class Firebase {
         ];
     }
 
+    /**
+     * Firebase key rules: no . $ # [ ] / and cannot start with .
+     * EAN numbers from Excel come as "4015400259275.0" — remove trailing .0
+     */
     public static function sanitizeKey(string $key): string {
-        return preg_replace('/[.\$#\[\]\/\s]/', '_', trim($key));
+        $key = trim($key);
+        // Remove trailing .0 from numeric EAN (Excel reads them as floats)
+        if (is_numeric($key)) {
+            $key = rtrim(rtrim($key, '0'), '.');
+        }
+        // Remove scientific notation (e.g. 4.015E+12 -> 4015...)
+        if (preg_match('/^[\d.]+[eE][+\-]?\d+$/', $key)) {
+            $key = rtrim(rtrim(number_format((float)$key, 0, '.', ''), '0'), '.');
+        }
+        // Replace invalid Firebase key chars
+        $key = preg_replace('/[.\$#\[\]\/\s]/', '_', $key);
+        // Remove leading/trailing underscores
+        $key = trim($key, '_');
+        return $key;
     }
 }

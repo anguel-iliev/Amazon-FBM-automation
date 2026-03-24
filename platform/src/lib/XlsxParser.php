@@ -109,7 +109,17 @@ class XlsxParser {
             }
 
             // Skip completely empty rows
-            $ean = trim($p['EAN Amazon'] ?? '');
+            $ean = trim((string)($p['EAN Amazon'] ?? ''));
+            // Excel reads EAN as float: 4015400259275.0 → strip .0
+            if (is_numeric($ean) && str_contains($ean, '.')) {
+                $ean = rtrim(rtrim($ean, '0'), '.');
+                $p['EAN Amazon'] = $ean;
+            }
+            // Scientific notation fix: 4.01540025E+12 → 4015400250000
+            if (preg_match('/^[\d.]+[eE][+\-]?\d+$/', $ean)) {
+                $ean = rtrim(rtrim(number_format((float)$ean, 0, '.', ''), '0'), '.');
+                $p['EAN Amazon'] = $ean;
+            }
             if ($ean === '') continue;
 
             // Ensure internal fields

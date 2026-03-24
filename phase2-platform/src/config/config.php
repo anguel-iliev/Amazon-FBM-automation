@@ -44,6 +44,13 @@ define('GOOGLE_CREDENTIALS_FILE', ROOT . '/src/config/google-credentials.json');
 define('GOOGLE_DRIVE_FOLDER_ID',  env('GOOGLE_DRIVE_FOLDER_ID', ''));
 define('GOOGLE_SHEET_ID',         env('GOOGLE_SHEET_ID', ''));
 
+
+// ── Firebase ─────────────────────────────────────────────────
+define('FIREBASE_PROJECT_ID',     env('FIREBASE_PROJECT_ID',     ''));
+define('FIREBASE_DATABASE_URL',   env('FIREBASE_DATABASE_URL',   ''));
+define('FIREBASE_DB_PATH',        env('FIREBASE_DB_PATH',        '/products'));
+define('FIREBASE_SECRET',         env('FIREBASE_SECRET',         ''));
+
 // ── Paths ───────────────────────────────────────────────────
 define('DATA_DIR',  ROOT . '/data');
 define('LOGS_DIR',  DATA_DIR . '/logs');

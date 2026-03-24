@@ -313,22 +313,20 @@ class ProductsController {
             'DM цена','Нова цена след намаление','Доставени','За следваща поръчка','Електоника'],';');
         fclose($out); exit;
     }
-}
 
     // ── Debug import ──────────────────────────────────────────
     public function debugImport(): void {
         header('Content-Type: application/json; charset=utf-8');
         if (empty($_FILES['file']['tmp_name'])) { echo json_encode(['error'=>'No file']); return; }
-        $tmp = $_FILES['file']['tmp_name'];
-        $parsed = XlsxParser::parse($tmp);
+        $parsed = XlsxParser::parse($_FILES['file']['tmp_name']);
         if (empty($parsed['products'])) { echo json_encode(['error'=>'Parse failed','errors'=>$parsed['errors']]); return; }
         $first3 = array_slice($parsed['products'], 0, 3);
-        // Test JSON encode
-        $json = json_encode($first3, JSON_UNESCAPED_UNICODE);
-        $keys = [];
+        $json   = json_encode($first3, JSON_UNESCAPED_UNICODE);
+        $keys   = [];
         foreach ($first3 as $p) {
-            $ean = Firebase::sanitizeKey($p['EAN Amazon']??'');
-            $keys[] = ['raw'=>$p['EAN Amazon']??'', 'sanitized'=>$ean, 'json_ok'=>json_encode([$ean=>['test'=>'val']]) !== false];
+            $ean    = Firebase::sanitizeKey($p['EAN Amazon']??'');
+            $keys[] = ['raw'=>$p['EAN Amazon']??'','sanitized'=>$ean];
         }
-        echo json_encode(['count'=>count($parsed['products']),'first3_keys'=>$keys,'json_ok'=>$json!==false,'json_error'=>json_last_error_msg(),'columns'=>$parsed['columns']??[]]);
+        echo json_encode(['count'=>count($parsed['products']),'first3_keys'=>$keys,'json_ok'=>$json!==false,'json_error'=>json_last_error_msg()]);
     }
+}

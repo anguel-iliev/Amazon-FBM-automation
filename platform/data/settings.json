@@ -1,0 +1,106 @@
+{
+  "marketplaces": {
+    "DE": {
+      "vat": 0.19,
+      "amazon_fee": 0.15,
+      "shipping": 4.5,
+      "fbm_fee": 1.0,
+      "min_margin": 0.15,
+      "active": true
+    },
+    "FR": {
+      "vat": 0.2,
+      "amazon_fee": 0.15,
+      "shipping": 5.0,
+      "fbm_fee": 1.0,
+      "min_margin": 0.15,
+      "active": true
+    },
+    "IT": {
+      "vat": 0.22,
+      "amazon_fee": 0.15,
+      "shipping": 5.5,
+      "fbm_fee": 1.0,
+      "min_margin": 0.15,
+      "active": true
+    },
+    "ES": {
+      "vat": 0.21,
+      "amazon_fee": 0.15,
+      "shipping": 5.5,
+      "fbm_fee": 1.0,
+      "min_margin": 0.15,
+      "active": true
+    },
+    "NL": {
+      "vat": 0.21,
+      "amazon_fee": 0.15,
+      "shipping": 4.5,
+      "fbm_fee": 1.0,
+      "min_margin": 0.15,
+      "active": true
+    },
+    "PL": {
+      "vat": 0.23,
+      "amazon_fee": 0.15,
+      "shipping": 6.0,
+      "fbm_fee": 1.0,
+      "min_margin": 0.15,
+      "active": false
+    },
+    "SE": {
+      "vat": 0.25,
+      "amazon_fee": 0.15,
+      "shipping": 7.0,
+      "fbm_fee": 1.0,
+      "min_margin": 0.15,
+      "active": false
+    }
+  },
+  "min_margin": 0.15,
+  "sync_auto": true,
+  "google_sheet_id": "",
+  "drive_folder_id": "1Wch88u5tZApf5UOXzeH9AO7TETXGKYnT",
+  "carriers": [
+    {
+      "id": "c_dhl",
+      "name": "DHL",
+      "active": true
+    },
+    {
+      "id": "c_dpd",
+      "name": "DPD",
+      "active": true
+    },
+    {
+      "id": "c_ups",
+      "name": "UPS",
+      "active": true
+    },
+    {
+      "id": "c_gls",
+      "name": "GLS",
+      "active": true
+    },
+    {
+      "id": "c_hermes",
+      "name": "Hermes",
+      "active": true
+    },
+    {
+      "id": "c_post",
+      "name": "Deutsche Post",
+      "active": false
+    }
+  ],
+  "firebase": {
+    "project_id": "amz-retail",
+    "db_url": "https://amz-retail-default-rtdb.europe-west1.firebasedatabase.app",
+    "enabled": true,
+    "sync_on_import": true,
+    "sync_on_update": true
+  },
+  "app_url": "https://amz-retail.tnsoft.eu",
+  "extra_formula_cols": [],
+  "formulas": {}
+}

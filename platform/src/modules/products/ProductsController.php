@@ -14,14 +14,23 @@ class ProductsController {
     public function index(): void {
         // Wrap in try-catch so even if Firebase fails, page still loads
         try {
-            $stats     = Firebase::getStats();
-            $suppliers = Firebase::getDistinct('Доставчик');
-            $brands    = Firebase::getDistinct('Бранд');
+            $stats  = Firebase::getStats();
+            $brands = Firebase::getDistinct('Бранд');
         } catch (\Throwable $e) {
             Logger::error("Products::index Firebase error: " . $e->getMessage());
-            $stats = ['total'=>0,'withAsin'=>0,'notUploaded'=>0,'suppliers'=>0];
-            $suppliers = [];
-            $brands    = [];
+            $stats  = ['total'=>0,'withAsin'=>0,'notUploaded'=>0,'suppliers'=>0];
+            $brands = [];
+        }
+
+        // Load suppliers from local file (authoritative 17 suppliers)
+        $supplierFile = DATA_DIR . '/suppliers.json';
+        $suppliers    = [];
+        if (file_exists($supplierFile)) {
+            $sl = json_decode(file_get_contents($supplierFile), true) ?? [];
+            foreach ($sl as $s) {
+                if ($s['active'] ?? true) $suppliers[] = $s['name'];
+            }
+            sort($suppliers);
         }
 
         $filters = [];
@@ -318,6 +327,27 @@ class ProductsController {
             'Резултат','Намерена 2ра обява','Цена за Испания / Франция / Италия',
             'DM цена','Нова цена след намаление','Доставени','За следваща поръчка','Електоника'],';');
         fclose($out); exit;
+    }
+
+    // ── Brands for supplier (AJAX) ───────────────────────────
+    public function brandsForSupplier(): void {
+        header('Content-Type: application/json; charset=utf-8');
+        $supplier = trim($_GET['supplier'] ?? '');
+        try {
+            if ($supplier === '') {
+                // No supplier selected → return all brands
+                $brands = Firebase::getDistinct('Бранд');
+            } else {
+                // Filter brands by supplier
+                $all    = Firebase::getProducts(['dostavchik' => $supplier]);
+                $brands = array_unique(array_filter(array_column($all, 'Бранд')));
+                sort($brands);
+                $brands = array_values($brands);
+            }
+            echo json_encode(['ok' => true, 'brands' => $brands]);
+        } catch (\Throwable $e) {
+            echo json_encode(['ok' => false, 'brands' => [], 'error' => $e->getMessage()]);
+        }
     }
 
     // ── Debug import ──────────────────────────────────────────

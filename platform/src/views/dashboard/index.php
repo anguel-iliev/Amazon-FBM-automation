@@ -1,18 +1,26 @@
 <?php
-$s         = $stats   ?? [];
-$logs      = $logs    ?? [];
-$recent    = $recent  ?? [];
-$lastSync  = $lastSync?? null;
-$avgRez    = $s['avgRez']  ?? 0;
-$posRez    = $s['posRez']  ?? 0;
-$negRez    = $s['negRez']  ?? 0;
+$s        = $stats   ?? [];
+$logs     = $logs    ?? [];
+$recent   = $recent  ?? [];
+$lastSync = $lastSync?? null;
+$avgRez   = $s['avgRez'] ?? 0;
+$posRez   = $s['posRez'] ?? 0;
+$negRez   = $s['negRez'] ?? 0;
+
+// Supplier count from local suppliers.json (authoritative — 17)
+$suppliersFile = DATA_DIR . '/suppliers.json';
+$supplierCount = 17;
+if (file_exists($suppliersFile)) {
+    $sl = json_decode(file_get_contents($suppliersFile), true) ?? [];
+    $supplierCount = count(array_filter($sl, fn($s) => $s['active'] ?? true));
+}
 ?>
 
 <div class="stats-grid">
   <div class="stat-card">
     <div class="stat-label">Общо продукти</div>
     <div class="stat-value"><?= number_format($s['total'] ?? 0) ?></div>
-    <div class="stat-sub"><?= $s['suppliers'] ?? 0 ?> доставчика</div>
+    <div class="stat-sub"><?= $supplierCount ?> доставчика</div>
   </div>
   <div class="stat-card accent-green">
     <div class="stat-label">С ASIN</div>
@@ -33,10 +41,10 @@ $negRez    = $s['negRez']  ?? 0;
   </div>
 </div>
 
-<!-- Avg Rezultat -->
+<!-- Финансов резултат (бивш Усреднен резултат) -->
 <div class="card mt-16">
   <div class="flex-between mb-16">
-    <div class="card-title" style="margin:0">Усреднен резултат (колона Y)</div>
+    <div class="card-title" style="margin:0">Финансов резултат (колона Y)</div>
     <a href="/products?sort=Резултат&dir=desc" class="btn btn-ghost btn-sm">Сортирай →</a>
   </div>
   <div class="grid-3" style="grid-template-columns:repeat(3,1fr)">
@@ -63,26 +71,7 @@ $negRez    = $s['negRez']  ?? 0;
   </div>
 </div>
 
-<!-- Quick actions -->
-<div class="card mt-16">
-  <div class="card-title">Бързи действия</div>
-  <div style="display:flex;gap:10px;flex-wrap:wrap">
-    <a href="/products/import" class="btn btn-primary">
-      <svg width="14" height="14" viewBox="0 0 20 20" fill="none"><path d="M4 6v-2a1 1 0 011-1h10a1 1 0 011 1v2M10 17V7M7 10l3-3 3 3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      Import Excel
-    </a>
-    <a href="/products?upload_status=NOT_UPLOADED" class="btn btn-ghost">
-      Виж за качване (<?= number_format($s['notUploaded'] ?? 0) ?>)
-    </a>
-    <a href="/products/add" class="btn btn-ghost">
-      <svg width="14" height="14" viewBox="0 0 20 20" fill="none"><path d="M10 4v12M4 10h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-      Добави продукт
-    </a>
-    <a href="/pricing" class="btn btn-ghost">Ценообразуване</a>
-  </div>
-</div>
-
-<!-- Recent -->
+<!-- Последно добавени продукти -->
 <div class="card mt-16">
   <div class="flex-between mb-16">
     <div class="card-title" style="margin:0">Последно добавени продукти</div>
@@ -99,11 +88,10 @@ $negRez    = $s['negRez']  ?? 0;
           <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><?= htmlspecialchars($p['Модел'] ?? '—') ?></td>
           <td><span class="badge badge-muted"><?= htmlspecialchars($p['Доставчик'] ?? '—') ?></span></td>
           <td class="font-head"><?= number_format((float)($p['Цена Доставчик -Netto'] ?? 0), 2) ?></td>
-          <td>
-            <?php $res = (float)($p['Резултат'] ?? 0); ?>
-            <?php if ($res > 0): ?><span style="color:var(--green)">+<?= number_format($res,2) ?></span>
-            <?php elseif ($res < 0): ?><span style="color:var(--red)"><?= number_format($res,2) ?></span>
-            <?php else: ?><span class="text-muted">—</span><?php endif; ?>
+          <td><?php $res=(float)($p['Резултат']??0);
+            if($res>0) echo '<span style="color:var(--green)">+'.number_format($res,2).'</span>';
+            elseif($res<0) echo '<span style="color:var(--red)">'.number_format($res,2).'</span>';
+            else echo '<span class="text-muted">—</span>'; ?>
           </td>
           <td><span class="badge <?= ($p['_upload_status']??'')!=='UPLOADED'?'badge-gold':'badge-green' ?>"><?= ($p['_upload_status']??'')!=='UPLOADED'?'За качване':'Качен' ?></span></td>
         </tr>

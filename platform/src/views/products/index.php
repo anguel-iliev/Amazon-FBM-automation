@@ -115,7 +115,7 @@ td.ed:hover{background:rgba(201,168,76,.05)!important}td.ed:hover::after{backgro
 <div class="pf">
 <div class="pfi">
   <div class="pfg"><label>Доставчик</label>
-    <select id="f-dost" style="min-width:130px" onchange="applyFilters()">
+    <select id="f-dost" style="min-width:130px" onchange="updateBrands(this.value)">
       <option value="">— Всички —</option>
       <?php foreach ($suppliers as $s): ?>
       <option value="<?= htmlspecialchars($s) ?>" <?= ($filters['dostavchik'] ?? '') === $s ? 'selected' : '' ?>><?= htmlspecialchars($s) ?></option>
@@ -369,6 +369,28 @@ function renderPager(page, pages, total, pp) {
   btns += `<button class="pgb" onclick="goPage(${page+1})" ${disabled(page<pages)}>›</button>`;
   btns += `<button class="pgb" onclick="goPage(${pages})" ${disabled(page<pages)}>»</button>`;
   document.getElementById('pgp-pages').innerHTML = btns;
+}
+
+// ── Dynamic brand filter ──────────────────────────────────────
+function updateBrands(supplier) {
+  const brandSel = document.getElementById('f-brand');
+  const currentBrand = brandSel.value;
+
+  fetch('/products/brands?supplier=' + encodeURIComponent(supplier))
+    .then(r => r.json())
+    .then(d => {
+      if (!d.ok) return;
+      brandSel.innerHTML = '<option value="">— Всички —</option>';
+      d.brands.forEach(b => {
+        const opt = document.createElement('option');
+        opt.value = b; opt.textContent = b;
+        if (b === currentBrand) opt.selected = true;
+        brandSel.appendChild(opt);
+      });
+      // Apply filters with new supplier
+      applyFilters();
+    })
+    .catch(() => applyFilters()); // fallback: just apply filters
 }
 
 // ── Navigation ─────────────────────────────────────────────────

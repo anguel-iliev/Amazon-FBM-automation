@@ -1,45 +1,19 @@
 <?php
-$page     = $page    ?? 1;
-$pages    = $pages   ?? 1;
-$total    = $total   ?? 0;
-$perPage  = $perPage ?? 50;
-$filters  = $filters ?? [];
-$products = $products?? [];
-$stats    = $stats   ?? [];
+/**
+ * Products v3.0 — AJAX-based grid
+ * Страницата зарежда само shell + filters.
+ * Данните идват от /products/data (JSON) — без Firebase timeout риск на page load.
+ */
+$stats     = $stats     ?? [];
+$suppliers = $suppliers ?? [];
+$brands    = $brands    ?? [];
+$filters   = $filters   ?? [];
+$perPage   = $perPage   ?? 50;
+$page      = $page      ?? 1;
 
-$from = $total > 0 ? ($page - 1) * $perPage + 1 : 0;
-$to   = min($page * $perPage, $total);
-
-function pq(array $extra = []): string {
-    global $filters, $page;
-    $base = array_filter($filters, fn($v) => $v !== '');
-    $p    = array_merge($base, $extra);
-    return $p ? '?' . http_build_query($p) : '';
-}
-
-$sortCol = $filters['sort'] ?? '';
-$sortDir = ($filters['dir'] ?? 'asc') === 'desc' ? 'desc' : 'asc';
-
-$COLS = [
-  'EAN Amazon'                       => ['EAN',          'mono',   120, false],
-  'Наше SKU'                         => ['Наше SKU',     'mono',   110, false],
-  'Доставчик'                        => ['Доставчик',    'text',   100, false],
-  'Бранд'                            => ['Бранд',        'text',   88,  false],
-  'Модел'                            => ['Модел',        'text',   220, false],
-  'Amazon Link'                      => ['Link',         'link',   46,  false],
-  'ASIN'                             => ['ASIN',         'mono',   110, false],
-  'Цена Доставчик -Netto'            => ['Дост.€',       'num',    80,  true],
-  'Цена Amazon  - Brutto'            => ['Amazon€',      'num',    80,  false],
-  'Продажна Цена в Амазон  - Brutto' => ['Продажна€',   'num',    88,  true],
-  'Amazon Такси'                     => ['Амз.такса',    'num',    78,  false],
-  'Транспорт до кр. лиент  Netto'    => ['Транспорт',   'num',    78,  true],
-  'Резултат'                         => ['Резултат',     'result', 78,  false],
-  'Корекция  на цена'                => ['Корекция',     'num',    75,  true],
-  'DM цена'                          => ['DM цена',      'num',    75,  true],
-  'Нова цена след намаление'         => ['Нова цена',    'num',    84,  true],
-  'Електоника'                       => ['Електроника',  'toggle', 80,  true],
-  'Коментар'                         => ['Коментар',     'text',   160, true],
-];
+// Build query for AJAX call
+$ajaxParams = array_merge($filters, ['perpage' => $perPage, 'page' => $page]);
+$ajaxQuery  = http_build_query(array_filter($ajaxParams, fn($v) => $v !== '' && $v !== null));
 ?>
 <style>
 .pw{display:flex;flex-direction:column;height:calc(100vh - 62px);overflow:hidden;padding:0}
@@ -76,9 +50,9 @@ $COLS = [
 .pgs::-webkit-scrollbar-corner{background:#12151C}
 .pgt{width:max-content;min-width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed}
 .pgt thead th{position:sticky;top:0;z-index:30;background:#1A1F30;border-bottom:2px solid rgba(201,168,76,.25);padding:0;vertical-align:middle;box-shadow:0 2px 0 rgba(0,0,0,.3)}
-.th-i{display:flex;align-items:center;gap:4px;padding:8px 10px;font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:rgba(255,255,255,.6);white-space:nowrap;border-right:1px solid rgba(255,255,255,.04)}
-.th-i a{color:inherit;text-decoration:none;display:flex;align-items:center;gap:4px}
-.th-i a:hover{color:#fff}
+.th-in{display:flex;align-items:center;gap:4px;padding:8px 10px;font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:rgba(255,255,255,.6);white-space:nowrap;border-right:1px solid rgba(255,255,255,.04)}
+.th-in a{color:inherit;text-decoration:none;display:flex;align-items:center;gap:4px}
+.th-in a:hover{color:#fff}
 .pgt tbody tr:hover td{background:rgba(255,255,255,.03)!important}
 .pgt tbody td{padding:5px 10px;border-bottom:1px solid rgba(255,255,255,.04);vertical-align:middle;color:#E8E6E1;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:0;border-right:1px solid rgba(255,255,255,.02);height:34px}
 .pgt tbody tr:last-child td{border-bottom:none}
@@ -89,32 +63,30 @@ td.cr{text-align:right;font-variant-numeric:tabular-nums;font-weight:700}
 td.cr.pos{color:#5DCCA0}td.cr.neg{color:#E05C5C}td.cr.zer{color:rgba(255,255,255,.25)}
 td.ed{cursor:text;position:relative}
 td.ed::after{content:'';position:absolute;bottom:2px;left:8px;right:8px;height:1px;background:rgba(201,168,76,.2)}
-td.ed:hover{background:rgba(201,168,76,.05)!important}
-td.ed:hover::after{background:rgba(201,168,76,.5)}
+td.ed:hover{background:rgba(201,168,76,.05)!important}td.ed:hover::after{background:rgba(201,168,76,.5)}
 .ci{width:100%;background:rgba(201,168,76,.08);border:1px solid var(--gold);border-radius:3px;padding:2px 6px;color:#fff;font-size:12px;font-family:inherit;outline:none;height:22px}
 .bg{display:inline-block;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:700;line-height:1.6}
 .bg-g{background:rgba(61,187,127,.15);color:#5DCCA0;border:1px solid rgba(61,187,127,.3)}
 .bg-a{background:rgba(201,168,76,.15);color:var(--gold-lt);border:1px solid rgba(201,168,76,.3)}
 .bg-m{background:rgba(255,255,255,.07);color:rgba(255,255,255,.5);border:1px solid rgba(255,255,255,.1)}
-.elek{display:inline-block;width:52px;padding:2px 0;border-radius:20px;font-size:10px;font-weight:700;line-height:1.6;text-align:center;cursor:pointer;user-select:none;transition:all .12s;border:1px solid transparent;color:#fff}
+.elek{display:inline-block;width:52px;padding:2px 0;border-radius:20px;font-size:10px;font-weight:700;line-height:1.6;text-align:center;cursor:pointer;user-select:none;border:1px solid transparent;color:#fff}
 .elek.y{background:rgba(61,187,127,.2);border-color:rgba(61,187,127,.4)}
 .elek.n{background:rgba(255,255,255,.06);color:rgba(255,255,255,.4);border-color:rgba(255,255,255,.1)}
-.al{display:inline-flex;align-items:center;justify-content:center;width:24px;height:20px;border-radius:4px;background:rgba(255,153,0,.1);border:1px solid rgba(255,153,0,.2);color:#FFA500;text-decoration:none;transition:all .12s}
+.al{display:inline-flex;align-items:center;justify-content:center;width:24px;height:20px;border-radius:4px;background:rgba(255,153,0,.1);border:1px solid rgba(255,153,0,.2);color:#FFA500;text-decoration:none}
 .al:hover{background:rgba(255,153,0,.2);color:#fff}
 .pgp{display:flex;justify-content:space-between;align-items:center;padding:7px 14px;border-top:1px solid rgba(255,255,255,.06);background:#181C26;flex-wrap:wrap;gap:6px;flex-shrink:0;border-bottom-left-radius:8px;border-bottom-right-radius:8px}
 .pgpg{display:flex;gap:3px;align-items:center;flex-wrap:wrap}
-.pgb{min-width:28px;height:26px;padding:0 7px;border-radius:4px;font-size:12px;font-weight:600;border:1px solid rgba(255,255,255,.1);background:transparent;color:rgba(255,255,255,.5);cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;transition:all .12s}
+.pgb{min-width:28px;height:26px;padding:0 7px;border-radius:4px;font-size:12px;font-weight:600;border:1px solid rgba(255,255,255,.1);background:transparent;color:rgba(255,255,255,.5);cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;justify-content:center}
 .pgb:hover{background:rgba(255,255,255,.06);color:#fff}
 .pgb.act{background:var(--gold);color:#0D0F14;border-color:var(--gold);font-weight:700}
 .pgb[disabled]{opacity:.3;pointer-events:none}
+.pgpp{display:flex;gap:5px;align-items:center;font-size:12px;color:rgba(255,255,255,.4)}
 .pgpp select{background:#0D0F14;border:1px solid rgba(255,255,255,.12);border-radius:4px;padding:3px 6px;font-size:12px;color:#fff;outline:none}
 .pgpp select option{background:#0D0F14}
-.pgpp{display:flex;gap:5px;align-items:center;font-size:12px;color:rgba(255,255,255,.4)}
-.toast{position:fixed;bottom:20px;right:20px;background:var(--green);color:#fff;padding:8px 16px;border-radius:6px;font-size:12px;font-weight:700;z-index:9999;display:none;animation:fiu .2s ease}
-@keyframes fiu{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
-.pg-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:60px 20px;gap:14px;color:rgba(255,255,255,.2)}
-.pg-empty h3{font-size:15px;font-weight:600;color:rgba(255,255,255,.35)}
-.pg-empty p{font-size:12px;text-align:center;line-height:1.7;max-width:300px}
+.loading-row td{text-align:center;padding:40px!important;color:rgba(255,255,255,.35)!important}
+.error-row td{text-align:center;padding:40px!important;color:#F08080!important}
+.empty-row td{text-align:center;padding:40px!important;color:rgba(255,255,255,.3)!important}
+.toast{position:fixed;bottom:20px;right:20px;background:var(--green);color:#fff;padding:8px 16px;border-radius:6px;font-size:12px;font-weight:700;z-index:9999;display:none}
 </style>
 
 <div class="pw">
@@ -123,7 +95,7 @@ td.ed:hover::after{background:rgba(201,168,76,.5)}
 <div class="psb">
   <div class="psc">
     <div class="psi"><svg width="16" height="16" viewBox="0 0 20 20" fill="none"><path d="M2 5h16M2 10h16M2 15h10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></div>
-    <div><div class="psv"><?= number_format($total) ?></div><div class="psl">Намерени</div></div>
+    <div><div class="psv" id="s-total"><?= number_format($stats['total'] ?? 0) ?></div><div class="psl">Общо</div></div>
   </div>
   <div class="psc g">
     <div class="psi"><svg width="16" height="16" viewBox="0 0 20 20" fill="none"><path d="M2 10l5 5 9-9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
@@ -141,10 +113,9 @@ td.ed:hover::after{background:rgba(201,168,76,.5)}
 
 <!-- Filters -->
 <div class="pf">
-<form method="get" action="/products" id="ff" style="width:100%">
 <div class="pfi">
   <div class="pfg"><label>Доставчик</label>
-    <select name="dostavchik" style="min-width:130px">
+    <select id="f-dost" style="min-width:130px" onchange="applyFilters()">
       <option value="">— Всички —</option>
       <?php foreach ($suppliers as $s): ?>
       <option value="<?= htmlspecialchars($s) ?>" <?= ($filters['dostavchik'] ?? '') === $s ? 'selected' : '' ?>><?= htmlspecialchars($s) ?></option>
@@ -152,7 +123,7 @@ td.ed:hover::after{background:rgba(201,168,76,.5)}
     </select>
   </div>
   <div class="pfg"><label>Бранд</label>
-    <select name="brand" style="min-width:100px">
+    <select id="f-brand" style="min-width:100px" onchange="applyFilters()">
       <option value="">— Всички —</option>
       <?php foreach ($brands as $b): ?>
       <option value="<?= htmlspecialchars($b) ?>" <?= ($filters['brand'] ?? '') === $b ? 'selected' : '' ?>><?= htmlspecialchars($b) ?></option>
@@ -160,137 +131,71 @@ td.ed:hover::after{background:rgba(201,168,76,.5)}
     </select>
   </div>
   <div class="pfg"><label>Статус</label>
-    <select name="upload_status" style="min-width:110px">
+    <select id="f-status" style="min-width:110px" onchange="applyFilters()">
       <option value="">— Всички —</option>
       <option value="NOT_UPLOADED" <?= ($filters['upload_status'] ?? '') === 'NOT_UPLOADED' ? 'selected' : '' ?>>За качване</option>
       <option value="UPLOADED" <?= ($filters['upload_status'] ?? '') === 'UPLOADED' ? 'selected' : '' ?>>Качени</option>
     </select>
   </div>
   <div class="pfg pfs"><label>Търсене</label>
-    <input type="text" name="search" placeholder="Модел, EAN, ASIN, SKU…" value="<?= htmlspecialchars($filters['search'] ?? '') ?>" style="width:100%">
+    <input type="text" id="f-search" placeholder="Модел, EAN, ASIN, SKU…" value="<?= htmlspecialchars($filters['search'] ?? '') ?>" style="width:100%" onkeydown="if(event.key==='Enter')applyFilters()">
   </div>
   <div class="pfa">
-    <button type="submit" class="btn btn-primary btn-sm">Търси</button>
-    <a href="/products" class="btn btn-ghost btn-sm">Изчисти</a>
+    <button class="btn btn-primary btn-sm" onclick="applyFilters()">Търси</button>
+    <button class="btn btn-ghost btn-sm" onclick="clearFilters()">Изчисти</button>
   </div>
-  <?php if ($sortCol): ?>
-  <input type="hidden" name="sort" value="<?= htmlspecialchars($sortCol) ?>">
-  <input type="hidden" name="dir" value="<?= $sortDir ?>">
-  <?php endif; ?>
 </div>
-</form>
 </div>
 
 <!-- Action row -->
 <div class="par">
-  <div class="par-info">
-    <?php if ($total > 0): ?>Показани <strong><?= number_format($from) ?>–<?= number_format($to) ?></strong> от <strong><?= number_format($total) ?></strong>
-    <?php else: ?><span style="color:rgba(255,255,255,.25)">Няма продукти</span><?php endif; ?>
-  </div>
-  <div style="display:flex;gap:6px;align-items:center">
+  <div class="par-info" id="par-info">Зареждане…</div>
+  <div style="display:flex;gap:6px">
     <a href="/products/add" class="btn btn-ghost btn-sm">
       <svg width="12" height="12" viewBox="0 0 20 20" fill="none"><path d="M10 4v12M4 10h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-      Добави продукт
+      Добави
     </a>
-    <a href="/products/import" class="btn btn-ghost btn-sm">
-      <svg width="12" height="12" viewBox="0 0 20 20" fill="none"><path d="M4 6v-2a1 1 0 011-1h10a1 1 0 011 1v2M10 17V7M7 10l3-3 3 3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      Import Excel
-    </a>
-    <a href="/products/export<?= pq() ?>" class="btn btn-ghost btn-sm">
-      <svg width="12" height="12" viewBox="0 0 20 20" fill="none"><path d="M4 14v2a1 1 0 001 1h10a1 1 0 001-1v-2M10 3v10M7 10l3 3 3-3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      CSV
-    </a>
+    <a href="/products/import" class="btn btn-ghost btn-sm">↑ Import</a>
+    <a id="export-btn" href="/products/export" class="btn btn-ghost btn-sm">↓ CSV</a>
   </div>
 </div>
 
 <!-- Grid -->
-<div class="pgo"><div class="pgw"><div class="pgs">
-<table class="pgt">
-  <thead><tr>
-  <?php foreach ($COLS as $key => [$label, $type, $width, $editable]):
-    $sorted  = $sortCol === $key;
-    $nextDir = ($sorted && $sortDir === 'asc') ? 'desc' : 'asc';
-    $icon    = $sorted ? ($sortDir === 'asc' ? '▲' : '▼') : '';
-  ?>
-  <th style="width:<?= $width ?>px"><div class="th-i">
-    <a href="/products<?= pq(['sort' => $key, 'dir' => $nextDir, 'page' => 1]) ?>"><?= htmlspecialchars($label) ?><?php if ($icon): ?> <span style="font-size:9px;opacity:.7"><?= $icon ?></span><?php endif; ?></a>
-  </div></th>
-  <?php endforeach; ?>
-  <th style="width:70px"><div class="th-i">Статус</div></th>
+<div class="pgo"><div class="pgw"><div class="pgs" id="pgs">
+<table class="pgt" id="pgt">
+  <thead><tr id="thead-row">
+    <th style="width:120px"><div class="th-in"><a href="#" onclick="sortBy('EAN Amazon');return false">EAN</a></div></th>
+    <th style="width:110px"><div class="th-in"><a href="#" onclick="sortBy('Наше SKU');return false">Наше SKU</a></div></th>
+    <th style="width:100px"><div class="th-in"><a href="#" onclick="sortBy('Доставчик');return false">Доставчик</a></div></th>
+    <th style="width:88px"><div class="th-in"><a href="#" onclick="sortBy('Бранд');return false">Бранд</a></div></th>
+    <th style="width:220px"><div class="th-in"><a href="#" onclick="sortBy('Модел');return false">Модел</a></div></th>
+    <th style="width:46px"><div class="th-in">Link</div></th>
+    <th style="width:110px"><div class="th-in"><a href="#" onclick="sortBy('ASIN');return false">ASIN</a></div></th>
+    <th style="width:80px"><div class="th-in"><a href="#" onclick="sortBy('Цена Доставчик -Netto');return false">Дост.€</a></div></th>
+    <th style="width:80px"><div class="th-in"><a href="#" onclick="sortBy('Продажна Цена в Амазон  - Brutto');return false">Продажна€</a></div></th>
+    <th style="width:80px"><div class="th-in"><a href="#" onclick="sortBy('Amazon Такси');return false">Амз.такса</a></div></th>
+    <th style="width:80px"><div class="th-in"><a href="#" onclick="sortBy('Транспорт до кр. лиент  Netto');return false">Транспорт</a></div></th>
+    <th style="width:78px"><div class="th-in"><a href="#" onclick="sortBy('Резултат');return false">Резултат</a></div></th>
+    <th style="width:75px"><div class="th-in">Корекция</div></th>
+    <th style="width:75px"><div class="th-in">DM цена</div></th>
+    <th style="width:80px"><div class="th-in">Електроника</div></th>
+    <th style="width:160px"><div class="th-in">Коментар</div></th>
+    <th style="width:70px"><div class="th-in">Статус</div></th>
   </tr></thead>
-  <tbody>
-  <?php if (empty($products)): ?>
-  <tr><td colspan="<?= count($COLS)+1 ?>" style="padding:0;border:none">
-    <div class="pg-empty">
-      <svg width="44" height="44" viewBox="0 0 20 20" fill="none"><path d="M2 5h16M2 10h16M2 15h10" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
-      <h3>Няма намерени продукти</h3>
-      <p><?php if (!empty($filters['search']) || !empty($filters['dostavchik'])): ?>Промени филтрите.<?php else: ?>Качи Excel файл с продукти чрез бутона <strong>Import Excel</strong>.<?php endif; ?></p>
-      <?php if (empty($filters['search']) && empty($filters['dostavchik'])): ?>
-      <a href="/products/import" class="btn btn-primary btn-sm">Import Excel</a>
-      <?php endif; ?>
-    </div>
-  </td></tr>
-  <?php endif; ?>
-  <?php foreach ($products as $p):
-    $ean    = $p['EAN Amazon'] ?? '';
-    $eanH   = htmlspecialchars($ean);
-    $link   = $p['Amazon Link'] ?? '';
-    $asin   = $p['ASIN'] ?? '';
-    $status = $p['_upload_status'] ?? 'NOT_UPLOADED';
-    $elek   = $p['Електоника'] ?? '';
-    $res    = (float)($p['Резултат'] ?? 0);
-    $resC   = $res > 0 ? 'pos' : ($res < 0 ? 'neg' : 'zer');
-  ?>
-  <tr data-ean="<?= $eanH ?>">
-    <?php foreach ($COLS as $key => [$label, $type, $width, $editable]):
-      $raw  = $p[$key] ?? null;
-      $valH = htmlspecialchars((string)($raw ?? ''));
-      $attr = $editable ? "data-ean=\"{$eanH}\" data-field=\"".htmlspecialchars($key)."\" onclick=\"editCell(this)\"" : '';
-    ?>
-    <?php if ($type === 'link'): ?>
-      <td class="cl"><?php if ($link): ?><a href="<?= htmlspecialchars($link) ?>" target="_blank" class="al"><svg width="10" height="10" viewBox="0 0 20 20" fill="none"><path d="M11 3h6v6M9 11L17 3M7 5H4a1 1 0 00-1 1v10a1 1 0 001 1h10a1 1 0 001-1v-3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></a><?php endif; ?></td>
-    <?php elseif ($key === 'ASIN'): ?>
-      <td class="cm"><?php if ($link && $asin): ?><a href="<?= htmlspecialchars($link) ?>" target="_blank" style="color:var(--gold-lt);text-decoration:none"><?= $valH ?></a><?php else: ?><?= $valH ?><?php endif; ?></td>
-    <?php elseif ($type === 'toggle'): ?>
-      <td class="cl"><span class="elek <?= $elek === 'Yes' ? 'y' : 'n' ?>" data-ean="<?= $eanH ?>" data-val="<?= htmlspecialchars($elek) ?>" onclick="toggleElek(this)"><?= $elek ?: '—' ?></span></td>
-    <?php elseif ($type === 'result'): ?>
-      <td class="cr <?= $resC ?>"><?= $res != 0 ? number_format($res, 2) : '' ?></td>
-    <?php elseif ($type === 'num'): ?>
-      <td class="cn<?= $editable ? ' ed' : '' ?>" <?= $attr ?>><?= $raw !== null && $raw !== '' ? number_format((float)$raw, 2) : '' ?></td>
-    <?php else: ?>
-      <td class="ct<?= $editable ? ' ed' : '' ?>" <?= $attr ?> title="<?= $valH ?>"><?= $valH ?></td>
-    <?php endif; ?>
-    <?php endforeach; ?>
-    <td class="cl"><span class="bg <?= $status === 'UPLOADED' ? 'bg-g' : 'bg-a' ?>"><?= $status === 'UPLOADED' ? 'Качен' : 'Не качен' ?></span></td>
-  </tr>
-  <?php endforeach; ?>
+  <tbody id="tbody">
+    <tr class="loading-row"><td colspan="17">
+      <div style="display:flex;align-items:center;justify-content:center;gap:10px">
+        <span class="spinner"></span> Зареждане от Firebase…
+      </div>
+    </td></tr>
   </tbody>
 </table>
 </div>
-
-<!-- Pagination -->
-<div class="pgp">
-  <div style="font-size:12px;color:rgba(255,255,255,.4)"><?php if ($total > 0): ?>Стр. <?= $page ?>/<?= $pages ?> · <?= number_format($total) ?> записа<?php endif; ?></div>
-  <div class="pgpg">
-    <?php if ($page > 1): ?>
-    <a href="/products<?= pq(['page' => 1]) ?>" class="pgb">«</a>
-    <a href="/products<?= pq(['page' => $page - 1]) ?>" class="pgb">‹</a>
-    <?php else: ?><span class="pgb" disabled>«</span><span class="pgb" disabled>‹</span><?php endif; ?>
-    <?php
-    $s = max(1, min($page - 3, $pages - 6));
-    $e = min($pages, max($page + 3, 7));
-    if ($s > 1) echo '<span style="color:rgba(255,255,255,.3);padding:0 4px">…</span>';
-    for ($i = $s; $i <= $e; $i++):
-    ?><a href="/products<?= pq(['page' => $i]) ?>" class="pgb <?= $i === $page ? 'act' : '' ?>"><?= $i ?></a><?php endfor;
-    if ($e < $pages) echo '<span style="color:rgba(255,255,255,.3);padding:0 4px">…</span>';
-    ?>
-    <?php if ($page < $pages): ?>
-    <a href="/products<?= pq(['page' => $page + 1]) ?>" class="pgb">›</a>
-    <a href="/products<?= pq(['page' => $pages]) ?>" class="pgb">»</a>
-    <?php else: ?><span class="pgb" disabled>›</span><span class="pgb" disabled>»</span><?php endif; ?>
-  </div>
+<div class="pgp" id="pgp" style="display:none">
+  <div style="font-size:12px;color:rgba(255,255,255,.4)" id="pgp-info"></div>
+  <div class="pgpg" id="pgp-pages"></div>
   <div class="pgpp">На стр.:
-    <select onchange="location.href='/products<?= pq(['perpage'=>'__','page'=>1]) ?>'.replace('__',this.value)">
+    <select id="pp-sel" onchange="changePerPage(this.value)">
       <?php foreach ([25,50,100,250] as $pp): ?><option value="<?= $pp ?>" <?= $pp===$perPage?'selected':'' ?>><?= $pp ?></option><?php endforeach; ?>
     </select>
   </div>
@@ -299,48 +204,216 @@ td.ed:hover::after{background:rgba(201,168,76,.5)}
 </div>
 
 <div class="toast" id="toast"></div>
+
 <script>
+// ── State ─────────────────────────────────────────────────────
+const STATE = {
+  dostavchik:    <?= json_encode($filters['dostavchik']    ?? '') ?>,
+  brand:         <?= json_encode($filters['brand']         ?? '') ?>,
+  upload_status: <?= json_encode($filters['upload_status'] ?? '') ?>,
+  search:        <?= json_encode($filters['search']        ?? '') ?>,
+  sort:          <?= json_encode($filters['sort']          ?? '') ?>,
+  dir:           <?= json_encode($filters['dir']           ?? 'asc') ?>,
+  page:          <?= (int)$page ?>,
+  perpage:       <?= (int)$perPage ?>,
+};
+
+// Column definitions [key, type, editable]
+const COLS = [
+  ['EAN Amazon',                       'mono',   false],
+  ['Наше SKU',                         'mono',   false],
+  ['Доставчик',                        'text',   false],
+  ['Бранд',                            'text',   false],
+  ['Модел',                            'text',   false],
+  ['Amazon Link',                      'link',   false],
+  ['ASIN',                             'mono',   false],
+  ['Цена Доставчик -Netto',            'num',    true],
+  ['Продажна Цена в Амазон  - Brutto', 'num',    true],
+  ['Amazon Такси',                     'num',    false],
+  ['Транспорт до кр. лиент  Netto',    'num',    true],
+  ['Резултат',                         'result', false],
+  ['Корекция  на цена',                'num',    true],
+  ['DM цена',                          'num',    true],
+  ['Електоника',                       'toggle', true],
+  ['Коментар',                         'text',   true],
+];
+
+// ── Load products via AJAX ─────────────────────────────────────
+function loadProducts() {
+  const tbody = document.getElementById('tbody');
+  tbody.innerHTML = '<tr class="loading-row"><td colspan="17"><div style="display:flex;align-items:center;justify-content:center;gap:10px"><span class="spinner"></span> Зареждане…</div></td></tr>';
+  document.getElementById('pgp').style.display = 'none';
+
+  const params = new URLSearchParams();
+  Object.entries(STATE).forEach(([k, v]) => { if (v !== '' && v !== null) params.set(k, v); });
+
+  // Update export link
+  const ep = new URLSearchParams(params);
+  ep.delete('page'); ep.delete('perpage'); ep.delete('sort'); ep.delete('dir');
+  document.getElementById('export-btn').href = '/products/export?' + ep.toString();
+
+  fetch('/products/data?' + params.toString())
+    .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then(data => {
+      if (!data.ok) throw new Error(data.error || 'Firebase error');
+      renderTable(data.products, data);
+      document.getElementById('s-total').textContent = data.total.toLocaleString();
+    })
+    .catch(err => {
+      tbody.innerHTML = '<tr class="error-row"><td colspan="17">✗ Грешка при зареждане: ' + escH(err.message) + '<br><small style="opacity:.6">Провери Firebase настройките → /products/diagnose</small></td></tr>';
+      document.getElementById('par-info').textContent = 'Грешка';
+    });
+}
+
+function renderTable(products, meta) {
+  const tbody = document.getElementById('tbody');
+  const total  = meta.total;
+  const page   = meta.page;
+  const pages  = meta.pages;
+  const pp     = meta.perPage;
+  const from   = total > 0 ? (page - 1) * pp + 1 : 0;
+  const to     = Math.min(page * pp, total);
+
+  // Update info
+  document.getElementById('par-info').innerHTML =
+    total > 0 ? `Показани <strong>${from.toLocaleString()}–${to.toLocaleString()}</strong> от <strong>${total.toLocaleString()}</strong>` : '<span style="color:rgba(255,255,255,.25)">Няма продукти</span>';
+
+  if (products.length === 0) {
+    tbody.innerHTML = '<tr class="empty-row"><td colspan="17">Няма намерени продукти.<br><small><a href="/products/import" style="color:var(--gold)">Импортирай Excel →</a></small></td></tr>';
+    document.getElementById('pgp').style.display = 'none';
+    return;
+  }
+
+  let html = '';
+  for (const p of products) {
+    const ean    = p['EAN Amazon'] || '';
+    const eanH   = escH(ean);
+    const link   = p['Amazon Link'] || '';
+    const asin   = p['ASIN'] || '';
+    const status = p['_upload_status'] || 'NOT_UPLOADED';
+    const elek   = p['Електоника'] || '';
+    const res    = parseFloat(p['Резултат'] || '0') || 0;
+    const resC   = res > 0 ? 'pos' : (res < 0 ? 'neg' : 'zer');
+
+    html += `<tr data-ean="${eanH}">`;
+    for (const [key, type, editable] of COLS) {
+      const raw  = p[key] ?? '';
+      const valH = escH(String(raw));
+      const attr = editable ? `data-ean="${eanH}" data-field="${escH(key)}" onclick="editCell(this)"` : '';
+      if (type === 'link') {
+        html += `<td class="cl">${link ? `<a href="${escH(link)}" target="_blank" class="al"><svg width="10" height="10" viewBox="0 0 20 20" fill="none"><path d="M11 3h6v6M9 11L17 3M7 5H4a1 1 0 00-1 1v10a1 1 0 001 1h10a1 1 0 001-1v-3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></a>` : ''}</td>`;
+      } else if (key === 'ASIN') {
+        html += `<td class="cm">${link && asin ? `<a href="${escH(link)}" target="_blank" style="color:var(--gold-lt);text-decoration:none">${valH}</a>` : valH}</td>`;
+      } else if (type === 'toggle') {
+        const y = elek === 'Yes';
+        html += `<td class="cl"><span class="elek ${y?'y':'n'}" data-ean="${eanH}" data-val="${escH(elek)}" onclick="toggleElek(this)">${elek || '—'}</span></td>`;
+      } else if (type === 'result') {
+        html += `<td class="cr ${resC}">${res !== 0 ? fmtNum(res) : ''}</td>`;
+      } else if (type === 'num') {
+        const n = raw !== '' && raw !== null ? parseFloat(raw) : null;
+        html += `<td class="cn${editable?' ed':''}" ${attr}>${n !== null && !isNaN(n) ? fmtNum(n) : ''}</td>`;
+      } else {
+        html += `<td class="ct${editable?' ed':''}" ${attr} title="${valH}">${valH}</td>`;
+      }
+    }
+    html += `<td class="cl"><span class="bg ${status==='UPLOADED'?'bg-g':'bg-a'}">${status==='UPLOADED'?'Качен':'Не качен'}</span></td>`;
+    html += '</tr>';
+  }
+  tbody.innerHTML = html;
+
+  // Pagination
+  renderPager(page, pages, total, pp);
+}
+
+function renderPager(page, pages, total, pp) {
+  const pgp = document.getElementById('pgp');
+  pgp.style.display = 'flex';
+
+  document.getElementById('pgp-info').textContent = total > 0 ? `Стр. ${page}/${pages} · ${total.toLocaleString()} записа` : '';
+
+  let btns = '';
+  const disabled = (on) => on ? '' : 'disabled';
+  btns += `<button class="pgb" onclick="goPage(1)" ${disabled(page>1)}>«</button>`;
+  btns += `<button class="pgb" onclick="goPage(${page-1})" ${disabled(page>1)}>‹</button>`;
+
+  let s = Math.max(1, Math.min(page - 3, pages - 6));
+  let e = Math.min(pages, Math.max(page + 3, 7));
+  if (s > 1) btns += '<span style="color:rgba(255,255,255,.3);padding:0 3px">…</span>';
+  for (let i = s; i <= e; i++) {
+    btns += `<button class="pgb${i===page?' act':''}" onclick="goPage(${i})">${i}</button>`;
+  }
+  if (e < pages) btns += '<span style="color:rgba(255,255,255,.3);padding:0 3px">…</span>';
+  btns += `<button class="pgb" onclick="goPage(${page+1})" ${disabled(page<pages)}>›</button>`;
+  btns += `<button class="pgb" onclick="goPage(${pages})" ${disabled(page<pages)}>»</button>`;
+  document.getElementById('pgp-pages').innerHTML = btns;
+}
+
+// ── Navigation ─────────────────────────────────────────────────
+function goPage(p)          { STATE.page = p; loadProducts(); }
+function sortBy(col)        { STATE.dir = (STATE.sort===col && STATE.dir==='asc') ? 'desc' : 'asc'; STATE.sort = col; STATE.page = 1; loadProducts(); }
+function changePerPage(val) { STATE.perpage = parseInt(val); STATE.page = 1; loadProducts(); }
+
+function applyFilters() {
+  STATE.dostavchik    = document.getElementById('f-dost').value;
+  STATE.brand         = document.getElementById('f-brand').value;
+  STATE.upload_status = document.getElementById('f-status').value;
+  STATE.search        = document.getElementById('f-search').value;
+  STATE.page = 1;
+  loadProducts();
+}
+function clearFilters() {
+  STATE.dostavchik = STATE.brand = STATE.upload_status = STATE.search = '';
+  STATE.sort = ''; STATE.dir = 'asc'; STATE.page = 1;
+  document.getElementById('f-dost').value = '';
+  document.getElementById('f-brand').value = '';
+  document.getElementById('f-status').value = '';
+  document.getElementById('f-search').value = '';
+  loadProducts();
+}
+
+// ── Cell edit ──────────────────────────────────────────────────
 function editCell(td) {
   if (td.querySelector('input')) return;
   const ean = td.dataset.ean, field = td.dataset.field;
   const orig = td.textContent.trim(), origV = orig.replace(/\s/g,'').replace(',','.');
   td.innerHTML = '';
   const inp = document.createElement('input');
-  inp.type = 'text'; inp.value = origV; inp.className = 'ci';
+  inp.type='text'; inp.value=origV; inp.className='ci';
   td.appendChild(inp); inp.focus(); inp.select();
   let saved = false;
   function commit() {
     if (saved) return; saved = true;
     const nv = inp.value.trim(), nf = parseFloat(nv.replace(',','.'));
-    td.textContent = (!isNaN(nf) && nv !== '') ? nf.toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2}) : nv;
+    td.textContent = (!isNaN(nf) && nv!=='') ? nf.toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2}) : nv;
     if (nv !== origV && ean && field) saveCell(ean, field, nv.replace(',','.'));
   }
   inp.addEventListener('blur', commit);
   inp.addEventListener('keydown', e => {
-    if (e.key === 'Enter') inp.blur();
-    if (e.key === 'Escape') { saved=true; inp.removeEventListener('blur',commit); td.textContent=orig; }
-    if (e.key === 'Tab') { e.preventDefault(); inp.blur(); const cells=[...td.closest('tr').querySelectorAll('td.ed')]; const nx=cells[cells.indexOf(td)+1]; if(nx)nx.click(); }
+    if (e.key==='Enter') inp.blur();
+    if (e.key==='Escape') { saved=true; inp.removeEventListener('blur',commit); td.textContent=orig; }
+    if (e.key==='Tab') { e.preventDefault(); inp.blur(); const cells=[...td.closest('tr').querySelectorAll('td.ed')]; const nx=cells[cells.indexOf(td)+1]; if(nx)nx.click(); }
   });
 }
 function saveCell(ean, field, value) {
-  const fd = new FormData(); fd.append('ean',ean); fd.append('field',field); fd.append('value',value);
+  const fd=new FormData(); fd.append('ean',ean); fd.append('field',field); fd.append('value',value);
   fetch('/products/update',{method:'POST',body:fd}).then(r=>r.json())
     .then(d=>toast(d.success?'✓ Запазено':'✗ '+(d.error||'Грешка'),!d.success))
     .catch(()=>toast('✗ Мрежова грешка',true));
 }
 function toggleElek(el) {
-  const next = el.dataset.val === 'Yes' ? 'No' : 'Yes';
-  el.textContent = next; el.dataset.val = next;
-  el.className = 'elek ' + (next==='Yes'?'y':'n');
+  const next=el.dataset.val==='Yes'?'No':'Yes';
+  el.textContent=next; el.dataset.val=next;
+  el.className='elek '+(next==='Yes'?'y':'n');
   saveCell(el.dataset.ean,'Електоника',next);
 }
+
+// ── Helpers ────────────────────────────────────────────────────
+function fmtNum(n) { return n.toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function escH(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 let tt;
-function toast(msg, isErr=false) {
-  const t=document.getElementById('toast');
-  t.textContent=msg; t.style.background=isErr?'var(--red)':'var(--green)';
-  t.style.display='block'; clearTimeout(tt); tt=setTimeout(()=>t.style.display='none',2000);
-}
-document.addEventListener('keydown', e => {
-  if ((e.ctrlKey||e.metaKey) && e.key==='f') { e.preventDefault(); document.querySelector('input[name="search"]')?.focus(); }
-});
+function toast(msg,isErr=false){const t=document.getElementById('toast');t.textContent=msg;t.style.background=isErr?'var(--red)':'var(--green)';t.style.display='block';clearTimeout(tt);tt=setTimeout(()=>t.style.display='none',2000);}
+document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key==='f'){e.preventDefault();document.getElementById('f-search').focus();}});
+
+// ── Init ───────────────────────────────────────────────────────
+loadProducts();
 </script>

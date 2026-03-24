@@ -1,29 +1,24 @@
 <?php
 declare(strict_types=1);
-
 define('ROOT', __DIR__);
 define('SRC',  ROOT . '/src');
-
 require_once SRC . '/config/config.php';
 require_once SRC . '/lib/Session.php';
 require_once SRC . '/lib/Router.php';
 require_once SRC . '/lib/Auth.php';
 require_once SRC . '/lib/Firebase.php';
 require_once SRC . '/lib/Logger.php';
-
 Firebase::init();
 
-// First-run: redirect to /setup if no users
+// First-run
 $usersFile = DATA_DIR . '/users.json';
 $noUsers   = !file_exists($usersFile) || empty(json_decode(@file_get_contents($usersFile), true));
 $reqUri    = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
-if ($noUsers && !preg_match('#^/setup#', $reqUri)) {
-    header('Location: /setup'); exit;
-}
+if ($noUsers && !preg_match('#^/setup#', $reqUri)) { header('Location: /setup'); exit; }
 
 $router = new Router();
 
-// ── Public ───────────────────────────────────────────────────
+// Public
 $router->add('GET',  '/setup',            'AuthController', 'setupPage');
 $router->add('POST', '/setup',            'AuthController', 'setupAction');
 $router->add('GET',  '/',                 'AuthController', 'loginPage');
@@ -38,11 +33,13 @@ $router->add('GET',  '/reset-password',   'AuthController', 'resetPage');
 $router->add('GET',  '/reset-password/:token', 'AuthController', 'resetPage');
 $router->add('POST', '/reset-password',   'AuthController', 'resetAction');
 
-// ── Protected ────────────────────────────────────────────────
+// Dashboard
 $router->add('GET',  '/dashboard',               'DashboardController', 'index');
 
 // Products
 $router->add('GET',  '/products',                'ProductsController',  'index');
+$router->add('GET',  '/products/data',           'ProductsController',  'data');       // AJAX
+$router->add('GET',  '/products/diagnose',       'ProductsController',  'diagnose');   // Debug
 $router->add('POST', '/products/update',         'ProductsController',  'update');
 $router->add('GET',  '/products/add',            'ProductsController',  'addPage');
 $router->add('POST', '/products/add',            'ProductsController',  'addAction');
@@ -67,12 +64,10 @@ $router->add('GET',  '/settings/formulas',       'SettingsController',  'formula
 $router->add('GET',  '/settings/integrations',   'SettingsController',  'integrations');
 $router->add('GET',  '/settings/system',         'SettingsController',  'system');
 $router->add('POST', '/settings/save',           'SettingsController',  'save');
-
-// Admin
 $router->add('GET',  '/invite',                  'AuthController',      'invitePage');
 $router->add('POST', '/invite',                  'AuthController',      'inviteAction');
 
-// ── API ──────────────────────────────────────────────────────
+// API
 $router->add('GET',  '/api/stats',               'ApiController',       'stats');
 $router->add('POST', '/api/test-firebase',        'ApiController',       'testFirebase');
 $router->add('POST', '/api/test-email',           'ApiController',       'testEmail');

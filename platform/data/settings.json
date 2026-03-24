@@ -95,8 +95,9 @@
   ],
   "firebase": {
     "project_id": "amz-retail",
+    "project_num": "820571488028",
     "db_url": "https://amz-retail-default-rtdb.europe-west1.firebasedatabase.app",
-    "enabled": true,
+    "enabled": false,
     "sync_on_import": true,
     "sync_on_update": true
   },

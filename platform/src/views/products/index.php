@@ -253,15 +253,38 @@ function loadProducts() {
   document.getElementById('export-btn').href = '/products/export?' + ep.toString();
 
   fetch('/products/data?' + params.toString())
-    .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then(r => r.text().then(text => {
+      let data;
+      try { data = JSON.parse(text); } catch(e) {
+        // PHP returned HTML error page — show it
+        throw new Error('Сървърът върна HTML вместо JSON (вероятно PHP Fatal Error).\n\nПърви 300 символа:\n' + text.substring(0, 300));
+      }
+      return data;
+    }))
     .then(data => {
-      if (!data.ok) throw new Error(data.error || 'Firebase error');
+      if (!data.ok) {
+        let msg = '<strong>✗ Грешка:</strong> ' + escH(data.error || 'Неизвестна грешка');
+        if (data.file) msg += '<br><code style="font-size:10px;opacity:.7">Файл: ' + escH(data.file) + '</code>';
+        if (data.diag) {
+          msg += '<br><br><strong>Диагностика:</strong>';
+          msg += '<br>• Firebase ready: ' + (data.diag.firebase_ready ? '✅' : '❌ НЕ');
+          msg += '<br>• cURL: ' + (data.diag.curl ? '✅' : '❌ НЕ');
+          msg += '<br>• allow_url_fopen: ' + (data.diag.fopen ? '✅' : '❌ НЕ');
+          msg += '<br>• DB URL: ' + escH(data.diag.db_url || 'ЛИПСВА');
+          msg += '<br>• Secret дължина: ' + (data.diag.secret_len || 0) + ' символа (трябва ~40)';
+        }
+        msg += '<br><br><a href="/products/diagnose" target="_blank" style="color:var(--gold)">Пълна диагностика →</a>';
+        tbody.innerHTML = '<tr class="error-row"><td colspan="17" style="padding:24px!important">' + msg + '</td></tr>';
+        document.getElementById('par-info').innerHTML = '<span style="color:var(--red)">✗ Firebase грешка</span>';
+        return;
+      }
       renderTable(data.products, data);
       document.getElementById('s-total').textContent = data.total.toLocaleString();
     })
     .catch(err => {
-      tbody.innerHTML = '<tr class="error-row"><td colspan="17">✗ Грешка при зареждане: ' + escH(err.message) + '<br><small style="opacity:.6">Провери Firebase настройките → /products/diagnose</small></td></tr>';
-      document.getElementById('par-info').textContent = 'Грешка';
+      const msg = escH(err.message).replace(/\n/g, '<br>');
+      tbody.innerHTML = '<tr class="error-row"><td colspan="17" style="padding:24px!important;font-size:12px"><strong>✗ Грешка при зареждане:</strong><br><br>' + msg + '<br><br><a href="/products/diagnose" target="_blank" style="color:var(--gold)">Отвори диагностика →</a></td></tr>';
+      document.getElementById('par-info').innerHTML = '<span style="color:var(--red)">✗ Грешка</span>';
     });
 }
 

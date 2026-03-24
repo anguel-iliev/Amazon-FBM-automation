@@ -10,6 +10,22 @@ require_once SRC . '/lib/Firebase.php';
 require_once SRC . '/lib/Logger.php';
 Firebase::init();
 
+// Global exception handler — always return JSON for AJAX routes
+set_exception_handler(function(\Throwable $e) {
+    $uri = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
+    if (str_contains($uri, '/products/data') || str_contains($uri, '/api/')) {
+        header('Content-Type: application/json; charset=utf-8');
+        http_response_code(200); // return 200 so browser reads the JSON
+        echo json_encode([
+            'ok'    => false,
+            'error' => 'PHP Exception: ' . $e->getMessage(),
+            'file'  => basename($e->getFile()) . ':' . $e->getLine(),
+            'trace' => substr($e->getTraceAsString(), 0, 500),
+        ]);
+        exit;
+    }
+});
+
 // First-run
 $usersFile = DATA_DIR . '/users.json';
 $noUsers   = !file_exists($usersFile) || empty(json_decode(@file_get_contents($usersFile), true));

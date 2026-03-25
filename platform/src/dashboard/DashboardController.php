@@ -2,9 +2,9 @@
 class DashboardController {
     public function index(): void {
         try {
-            $stats  = ProductCache::stats();     // reads local cache — instant
+            $stats  = ProductDB::stats();     // reads local cache — instant
             $logs   = Firebase::getLogs(6);      // small log data — ok
-            $recent = array_slice(ProductCache::all(), 0, 10);
+            $recent = ProductDB::query([], '', 'asc', 1, 10)['products'];
         } catch (\Throwable $e) {
             Logger::error("Dashboard Firebase: " . $e->getMessage());
             $stats  = ['total'=>0,'withAsin'=>0,'notUploaded'=>0,'suppliers'=>0,'avgRez'=>0,'posRez'=>0,'negRez'=>0];

@@ -1,1 +1,5 @@
 Deny from all
+
+<Files ~ "\.sqlite$">
+    Deny from all
+</Files>

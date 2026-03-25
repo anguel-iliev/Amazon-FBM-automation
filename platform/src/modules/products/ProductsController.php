@@ -13,9 +13,9 @@ class ProductsController {
     // ── Index — server-side paginated ────────────────────────
     public function index(): void {
         try {
-            $stats     = ProductCache::stats();
+            $stats     = ProductDB::stats();
             $suppliers = $this->loadSupplierNames();
-            $brands    = ProductCache::distinct('Бранд');
+            $brands    = ProductDB::distinct('Бранд');
         } catch (\Throwable $e) {
             Logger::error("Products::index: " . $e->getMessage());
             $stats = ['total'=>0,'withAsin'=>0,'notUploaded'=>0,'suppliers'=>0];
@@ -49,7 +49,7 @@ class ProductsController {
             $sortDir = ($_GET['dir'] ?? 'asc') === 'desc' ? 'desc' : 'asc';
 
             // SERVER-SIDE: filter+sort+paginate in PHP from local cache
-            $result = ProductCache::query($filters, $sortCol, $sortDir, $page, $perPage);
+            $result = ProductDB::query($filters, $sortCol, $sortDir, $page, $perPage);
 
             echo json_encode(array_merge($result, ['ok' => true]), JSON_UNESCAPED_UNICODE);
 
@@ -60,7 +60,7 @@ class ProductsController {
                 'error' => 'PHP грешка: ' . $e->getMessage(),
                 'file'  => basename($e->getFile()) . ':' . $e->getLine(),
                 'diag'  => [
-                    'cache_status'   => ProductCache::status(),
+                    'cache_status'   => ProductDB::status(),
                     'firebase_ready' => Firebase::isReady(),
                     'curl'           => function_exists('curl_init'),
                 ],
@@ -73,7 +73,7 @@ class ProductsController {
         header('Content-Type: application/json; charset=utf-8');
         try {
             $supplier = trim($_GET['supplier'] ?? '');
-            $brands   = ProductCache::distinct('Бранд', $supplier);
+            $brands   = ProductDB::distinct('Бранд', $supplier);
             echo json_encode(['ok' => true, 'brands' => $brands]);
         } catch (\Throwable $e) {
             echo json_encode(['ok' => false, 'brands' => [], 'error' => $e->getMessage()]);
@@ -96,7 +96,7 @@ class ProductsController {
             if (!$ok) { echo json_encode(['success'=>false,'error'=>'Firebase write failed']); return; }
 
             // Update local cache
-            ProductCache::updateOne($ean, $field, $value);
+            ProductDB::updateField($ean, $field, $value);
 
             Logger::info("Update: EAN={$ean} {$field}={$value}");
             echo json_encode(['success' => true]);
@@ -128,8 +128,8 @@ class ProductsController {
 
             $ok = Firebase::addProduct($p);
             if ($ok) {
-                // Rebuild cache to include new product
-                ProductCache::rebuildFromFirebase();
+                // Insert into SQLite
+                ProductDB::insertOne($p);
                 Logger::info("Add: EAN={$p['EAN Amazon']}");
             }
             echo json_encode(['success'=>$ok,'error'=>$ok?null:'Firebase грешка']);
@@ -141,7 +141,7 @@ class ProductsController {
     // ── Import page ───────────────────────────────────────────
     public function importPage(): void {
         try { $archives = Firebase::listArchives(); } catch (\Throwable $e) { $archives = []; }
-        $cacheStatus = ProductCache::status();
+        $cacheStatus = ProductDB::status();
         View::renderWithLayout('products/import', [
             'pageTitle'   => 'Import продукти',
             'activePage'  => 'products',
@@ -178,8 +178,8 @@ class ProductsController {
                 // First import — no archive, just write
                 $result = Firebase::firstImport($parsed['products']);
                 if (!$result['ok']) { echo json_encode(['success'=>false,'error'=>$result['error'],'written'=>$result['written']]); return; }
-                // Rebuild local cache
-                ProductCache::write($parsed['products']);
+                // Write to SQLite
+                ProductDB::replaceAll($parsed['products']);
                 Firebase::appendLog(['type'=>'import_first','count'=>$result['written']]);
                 echo json_encode(['success'=>true,'mode'=>'first','count'=>$result['written'],
                     'message'=>"Импортирани {$result['written']} продукта."]);
@@ -188,8 +188,8 @@ class ProductsController {
                 $archiveKey = Firebase::archiveCurrent($label ?: 'Преди импорт '.date('d.m.Y H:i'));
                 $result     = Firebase::putProducts($parsed['products']);
                 if (!$result['ok']) { echo json_encode(['success'=>false,'error'=>$result['error'],'written'=>$result['written']]); return; }
-                // Rebuild local cache
-                ProductCache::write($parsed['products']);
+                // Write to SQLite
+                ProductDB::replaceAll($parsed['products']);
                 Firebase::appendLog(['type'=>'import_replace','count'=>$result['written']]);
                 echo json_encode(['success'=>true,'mode'=>'replace','count'=>$result['written'],
                     'archive_key'=>$archiveKey,'message'=>"Заменени с {$result['written']} продукта."]);
@@ -199,7 +199,7 @@ class ProductsController {
                 $result = Firebase::mergeProducts($parsed['products']);
                 if (!empty($result['error'])) { echo json_encode(['success'=>false,'error'=>$result['error']]); return; }
                 // Rebuild cache from Firebase to include merged data
-                ProductCache::rebuildFromFirebase();
+                ProductDB::rebuildFromFirebase();
                 Firebase::appendLog(['type'=>'import_merge','added'=>$result['added'],'skipped'=>$result['skipped']]);
                 echo json_encode(['success'=>true,'mode'=>'merge','added'=>$result['added'],
                     'skipped'=>$result['skipped'],'total'=>$result['total'],
@@ -220,7 +220,7 @@ class ProductsController {
             Firebase::archiveCurrent('Преди възстановяване '.date('d.m.Y H:i'));
             $ok = Firebase::restoreArchive($key);
             if ($ok) {
-                ProductCache::rebuildFromFirebase();
+                ProductDB::rebuildFromFirebase();
             }
             echo json_encode(['success'=>$ok,'message'=>$ok?'Архивът е зареден!':'Firebase грешка']);
         } catch (\Throwable $e) {
@@ -232,8 +232,8 @@ class ProductsController {
     public function rebuildCache(): void {
         header('Content-Type: application/json; charset=utf-8');
         try {
-            $ok     = ProductCache::rebuildFromFirebase();
-            $status = ProductCache::status();
+            $ok     = ProductDB::rebuildFromFirebase();
+            $status = ProductDB::status();
             echo json_encode(['success'=>$ok,'status'=>$status,'message'=>$ok?"Кешът е обновен ({$status['count']} продукта)":'Firebase грешка']);
         } catch (\Throwable $e) {
             echo json_encode(['success'=>false,'error'=>$e->getMessage()]);
@@ -245,7 +245,7 @@ class ProductsController {
         try {
             $filters  = $this->parseFilters();
             // For export we need ALL matching — no pagination
-            $result   = ProductCache::query($filters, '', 'asc', 1, 999999);
+            $result   = ProductDB::query($filters, '', 'asc', 1, 999999);
             $products = $result['products'];
 
             $headers = ['EAN Amazon','EAN Доставчик','Корекция  на цена','Коментар',
@@ -296,7 +296,7 @@ class ProductsController {
         header('Content-Type: application/json; charset=utf-8');
         try {
             $conn        = Firebase::testConnection();
-            $cacheStatus = ProductCache::status();
+            $cacheStatus = ProductDB::status();
             echo json_encode([
                 'firebase'     => $conn,
                 'cache'        => $cacheStatus,

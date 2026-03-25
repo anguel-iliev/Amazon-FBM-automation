@@ -10,6 +10,12 @@ require_once SRC . '/lib/Firebase.php';
 require_once SRC . '/lib/Logger.php';
 Firebase::init();
 
+// ── Start session immediately ─────────────────────────────
+Session::start();
+
+// ── Remove /logout from public — handle it explicitly ─────
+// Logout needs session to destroy it, not public access
+
 // Global exception handler — always return JSON for AJAX routes
 set_exception_handler(function(\Throwable $e) {
     $uri = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
@@ -62,6 +68,7 @@ $router->add('POST', '/products/add',            'ProductsController',  'addActi
 $router->add('GET',  '/products/import',         'ProductsController',  'importPage');
 $router->add('POST', '/products/import',         'ProductsController',  'importAction');
 $router->add('POST', '/products/restore',        'ProductsController',  'restoreArchive');
+$router->add('GET',  '/products/export-archive',  'ProductsController',  'exportArchive');
 $router->add('GET',  '/products/export',         'ProductsController',  'export');
 $router->add('GET',  '/products/template',       'ProductsController',  'template');
 $router->add('POST', '/products/debug-import',    'ProductsController',  'debugImport');

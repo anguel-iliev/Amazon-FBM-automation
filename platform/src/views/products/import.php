@@ -168,7 +168,10 @@
               <td style="padding:8px 14px;border-bottom:1px solid var(--border);max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="<?= htmlspecialchars($a['label']) ?>"><?= htmlspecialchars($a['label']) ?></td>
               <td style="padding:8px 14px;border-bottom:1px solid var(--border);text-align:right"><?= number_format($a['count']) ?></td>
               <td style="padding:8px 14px;border-bottom:1px solid var(--border);text-align:right">
-                <button class="btn btn-ghost btn-sm" onclick="restoreArchive('<?= htmlspecialchars($a['key']) ?>', '<?= htmlspecialchars($a['label']) ?>')">Зареди</button>
+                <div style="display:flex;gap:5px">
+                  <a href="/products/export-archive?key=<?= urlencode($a['key']) ?>" class="btn btn-ghost btn-sm" title="Свали архива като Excel файл" style="color:var(--green)">↓ .xlsx</a>
+                  <button class="btn btn-ghost btn-sm" onclick="restoreArchive('<?= htmlspecialchars($a['key']) ?>', '<?= htmlspecialchars($a['label']) ?>')">Зареди</button>
+                </div>
               </td>
             </tr>
             <?php endforeach; ?>

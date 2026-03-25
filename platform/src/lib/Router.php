@@ -1,21 +1,31 @@
 <?php
 class Router {
-    private $routes = [];
 
-    // Public routes that never require login
-    private $publicRoutes = [
-        '/', '/logout',
-        '/register', '/forgot-password', '/reset-password',
+    private array $routes = [];
+
+    // ONLY these routes are public — everything else requires login
+    private array $publicRoutes = [
+        '/',
+        '/register',
+        '/forgot-password',
+        '/reset-password',
+        '/setup',
     ];
 
-    public function add($method, $path, $controller, $action) {
+    public function add(string $method, string $path, string $controller, string $action): void {
         $this->routes[] = compact('method', 'path', 'controller', 'action');
     }
 
-    public function dispatch() {
+    public function dispatch(): void {
         $method = $_SERVER['REQUEST_METHOD'];
-        $uri    = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+        $uri    = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
         $uri    = rtrim($uri, '/') ?: '/';
+
+        // ── Security headers on every response ───────────────
+        header('X-Frame-Options: SAMEORIGIN');
+        header('X-Content-Type-Options: nosniff');
+        header('X-XSS-Protection: 1; mode=block');
+        header('Referrer-Policy: strict-origin-when-cross-origin');
 
         foreach ($this->routes as $route) {
             if ($route['method'] !== $method) continue;
@@ -27,13 +37,21 @@ class Router {
                 $_GET[$k] = $v;
             }
 
-            $isPublic = $this->isPublicRoute($uri);
-            $isApi    = (strpos($uri, '/api/') === 0);
+            // ── ACCESS CONTROL ────────────────────────────────
+            // DEFAULT: ALL routes require login
+            // EXCEPTION: only explicitly listed public routes
+            if (!$this->isPublicRoute($uri)) {
+                $isJsonRoute = str_starts_with($uri, '/api/')
+                    || str_ends_with($uri, '/data')
+                    || str_ends_with($uri, '/diagnose')
+                    || str_ends_with($uri, '/brands')
+                    || str_ends_with($uri, '/rebuild-cache')
+                    || str_ends_with($uri, '/debug-import')
+                    || str_ends_with($uri, '/update')
+                    || str_ends_with($uri, '/import')
+                    || $_SERVER['HTTP_ACCEPT'] ?? '' === 'application/json';
 
-            if ($isApi) {
-                Auth::requireLogin(true);
-            } elseif (!$isPublic) {
-                Auth::requireLogin();
+                Auth::requireLogin($isJsonRoute);
             }
 
             $ctrl = new $route['controller']();
@@ -43,7 +61,7 @@ class Router {
 
         // 404
         http_response_code(404);
-        if (strpos($uri, '/api/') === 0) {
+        if (str_starts_with($uri, '/api/')) {
             header('Content-Type: application/json');
             echo json_encode(['error' => 'Not found']);
         } else {
@@ -51,7 +69,7 @@ class Router {
         }
     }
 
-    private function matchPath($pattern, $uri, &$params) {
+    private function matchPath(string $pattern, string $uri, array &$params): bool {
         if ($pattern === $uri) return true;
 
         $patParts = explode('/', trim($pattern, '/'));
@@ -69,11 +87,11 @@ class Router {
         return true;
     }
 
-    private function isPublicRoute($uri) {
+    private function isPublicRoute(string $uri): bool {
         foreach ($this->publicRoutes as $pub) {
             if ($uri === $pub) return true;
-            $prefix = rtrim($pub, '/') . '/';
-            if (strpos($uri, $prefix) === 0) return true;
+            // Allow sub-paths: /register/TOKEN, /reset-password/TOKEN etc.
+            if (str_starts_with($uri, rtrim($pub, '/') . '/')) return true;
         }
         return false;
     }

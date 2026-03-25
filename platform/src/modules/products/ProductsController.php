@@ -349,3 +349,168 @@ class ProductsController {
         return array_values($names);
     }
 }
+
+    // ── Export archive as XLSX ────────────────────────────────
+    public function exportArchive(): void {
+        $key = trim($_GET['key'] ?? '');
+        if (!$key) {
+            http_response_code(400); echo 'Невалиден архивен ключ'; exit;
+        }
+
+        // Load archive from Firebase
+        $res = Firebase::get("/archive/{$key}");
+        if (!$res['ok'] || empty($res['data']['products'])) {
+            http_response_code(404); echo 'Архивът не е намерен'; exit;
+        }
+
+        $products = array_values($res['data']['products']);
+        $label    = $res['data']['label'] ?? $key;
+        $date     = $res['data']['date']  ?? '';
+        $filename = 'archive_' . preg_replace('/[^a-zA-Z0-9_\-]/', '_', $key) . '.xlsx';
+
+        // Generate XLSX using simple SpreadsheetML (XML-based, no library needed)
+        $headers = [
+            'EAN Amazon','EAN Доставчик','Корекция  на цена','Коментар',
+            'Наше SKU','Доставчик SKU','Доставчик','Бранд','Модел','Amazon Link','ASIN',
+            'Цена Конкурент  - Brutto','Цена Amazon  - Brutto',
+            'Продажна Цена в Амазон  - Brutto','Цена без ДДС',
+            'ДДС от продажна цена','Amazon Такси','Цена Доставчик -Netto',
+            'ДДС  от Цена Доставчик','Транспорт от Доставчик до нас',
+            'Транспорт до кр. лиент  Netto','ДДС  от Транспорт до кр. лиент',
+            'Резултат','Намерена 2ра обява','Цена за ES FR IT',
+            'DM цена','Нова цена след намаление','Доставени','За следваща поръчка','Електоника',
+        ];
+
+        $xlsx = $this->buildXlsx($headers, $products, $label);
+
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        header('Content-Disposition: attachment; filename="' . $filename . '"');
+        header('Content-Length: ' . strlen($xlsx));
+        header('Cache-Control: max-age=0');
+        echo $xlsx;
+        exit;
+    }
+
+    /**
+     * Build a valid .xlsx file using ZipArchive + SpreadsheetML
+     * No external libraries needed.
+     */
+    private function buildXlsx(array $headers, array $rows, string $sheetName = 'Products'): string {
+        // Collect all strings for shared strings
+        $strings  = [];
+        $strIndex = [];
+
+        $addString = function(string $s) use (&$strings, &$strIndex): int {
+            if (!isset($strIndex[$s])) {
+                $strIndex[$s] = count($strings);
+                $strings[]    = $s;
+            }
+            return $strIndex[$s];
+        };
+
+        // Pre-process: build row data
+        $sheetRows = [];
+
+        // Header row
+        $hRow = [];
+        foreach ($headers as $h) { $hRow[] = ['t' => 's', 'v' => $addString($h)]; }
+        $sheetRows[] = $hRow;
+
+        // Data rows
+        foreach ($rows as $p) {
+            $row = [];
+            foreach ($headers as $h) {
+                $val = (string)($p[$h] ?? '');
+                if ($val !== '' && is_numeric(str_replace(',', '.', $val))) {
+                    $row[] = ['t' => 'n', 'v' => $val];
+                } else {
+                    $row[] = ['t' => 's', 'v' => $addString($val)];
+                }
+            }
+            $sheetRows[] = $row;
+        }
+
+        // Build sheet XML
+        $colLetters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+        $sheetXml   = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+        $sheetXml  .= '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">';
+        $sheetXml  .= '<sheetData>';
+
+        foreach ($sheetRows as $ri => $row) {
+            $rowNum = $ri + 1;
+            $sheetXml .= "<row r=\"{$rowNum}\">";
+            foreach ($row as $ci => $cell) {
+                $colLetter = $ci < 26 ? $colLetters[$ci] : $colLetters[intdiv($ci,26)-1] . $colLetters[$ci%26];
+                $ref = $colLetter . $rowNum;
+                if ($cell['t'] === 'n') {
+                    $sheetXml .= "<c r=\"{$ref}\"><v>" . htmlspecialchars($cell['v'], ENT_XML1) . "</v></c>";
+                } else {
+                    $sheetXml .= "<c r=\"{$ref}\" t=\"s\"><v>" . $cell['v'] . "</v></c>";
+                }
+            }
+            $sheetXml .= '</row>';
+        }
+        $sheetXml .= '</sheetData></worksheet>';
+
+        // Build shared strings XML
+        $ssXml  = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+        $ssXml .= '<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="' . count($strings) . '" uniqueCount="' . count($strings) . '">';
+        foreach ($strings as $s) {
+            $ssXml .= '<si><t>' . htmlspecialchars($s, ENT_XML1 | ENT_QUOTES, 'UTF-8') . '</t></si>';
+        }
+        $ssXml .= '</sst>';
+
+        // Build XLSX zip in memory
+        $tmpFile = tempnam(sys_get_temp_dir(), 'xlsx_');
+        $zip     = new ZipArchive();
+        $zip->open($tmpFile, ZipArchive::OVERWRITE);
+
+        $zip->addFromString('[Content_Types].xml',
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            . '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+            . '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+            . '<Default Extension="xml" ContentType="application/xml"/>'
+            . '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+            . '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+            . '<Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>'
+            . '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
+            . '</Types>');
+
+        $zip->addFromString('_rels/.rels',
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            . '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            . '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
+            . '</Relationships>');
+
+        $zip->addFromString('xl/workbook.xml',
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            . '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+            . '<sheets><sheet name="' . htmlspecialchars($sheetName, ENT_XML1) . '" sheetId="1" r:id="rId1"/></sheets>'
+            . '</workbook>');
+
+        $zip->addFromString('xl/_rels/workbook.xml.rels',
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            . '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            . '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'
+            . '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/>'
+            . '<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
+            . '</Relationships>');
+
+        $zip->addFromString('xl/styles.xml',
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            . '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+            . '<fonts><font><sz val="11"/><name val="Calibri"/></font></fonts>'
+            . '<fills><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>'
+            . '<borders><border><left/><right/><top/><bottom/><diagonal/></border></borders>'
+            . '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
+            . '<cellXfs><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs>'
+            . '</styleSheet>');
+
+        $zip->addFromString('xl/sharedStrings.xml', $ssXml);
+        $zip->addFromString('xl/worksheets/sheet1.xml', $sheetXml);
+        $zip->close();
+
+        $content = file_get_contents($tmpFile);
+        @unlink($tmpFile);
+        return $content;
+    }

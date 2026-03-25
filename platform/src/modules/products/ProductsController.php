@@ -348,8 +348,6 @@ class ProductsController {
         sort($names);
         return array_values($names);
     }
-}
-
     // ── Export archive as XLSX ────────────────────────────────
     public function exportArchive(): void {
         $key = trim($_GET['key'] ?? '');
@@ -514,3 +512,5 @@ class ProductsController {
         @unlink($tmpFile);
         return $content;
     }
+
+}

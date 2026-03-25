@@ -114,6 +114,36 @@
       </div>
     </div>
 
+    <!-- Cache status -->
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+        <div class="card-title" style="margin:0">Локален кеш</div>
+        <button class="btn btn-ghost btn-sm" onclick="rebuildCache(this)">⟳ Обнови</button>
+      </div>
+      <?php $cs = $cacheStatus ?? []; ?>
+      <div style="display:flex;flex-direction:column;gap:6px;font-size:13px">
+        <div style="display:flex;justify-content:space-between">
+          <span style="color:rgba(255,255,255,.6)">Статус</span>
+          <span style="color:<?= ($cs['exists']??false)?'var(--green)':'var(--red)' ?>;font-weight:600"><?= ($cs['exists']??false)?'✅ Активен':'❌ Липсва' ?></span>
+        </div>
+        <div style="display:flex;justify-content:space-between">
+          <span style="color:rgba(255,255,255,.6)">Продукти</span>
+          <span style="font-weight:600"><?= number_format($cs['count'] ?? 0) ?></span>
+        </div>
+        <div style="display:flex;justify-content:space-between">
+          <span style="color:rgba(255,255,255,.6)">Размер</span>
+          <span><?= $cs['size'] ? number_format($cs['size']/1024/1024,1).' MB' : '—' ?></span>
+        </div>
+        <?php if (!empty($cs['modified'])): ?>
+        <div style="display:flex;justify-content:space-between">
+          <span style="color:rgba(255,255,255,.6)">Обновен</span>
+          <span style="font-size:12px"><?= date('d.m.Y H:i', strtotime($cs['modified'])) ?></span>
+        </div>
+        <?php endif; ?>
+      </div>
+      <p style="font-size:11px;color:rgba(255,255,255,.4);margin-top:10px;line-height:1.5">Кешът се обновява автоматично при всеки импорт. При нужда — натисни "Обнови" за ръчно обновяване от Firebase.</p>
+    </div>
+
     <div class="card" style="padding:0">
       <div style="padding:14px 20px;border-bottom:1px solid var(--border)">
         <div class="card-title" style="margin:0">Архиви (<?= count($archives) ?>)</div>
@@ -275,6 +305,19 @@ function showResult(msg, ok) {
   el.style.display = 'block';
 }
 function escH(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function rebuildCache(btn) {
+  const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = '⟳ Обновяване…';
+  fetch('/products/rebuild-cache', {method:'POST'})
+    .then(r=>r.json())
+    .then(d=>{
+      alert(d.success ? '✓ ' + d.message : '✗ ' + (d.error||'Грешка'));
+      if(d.success) location.reload();
+    })
+    .catch(()=>alert('✗ Мрежова грешка'))
+    .finally(()=>{ btn.disabled=false; btn.textContent=orig; });
+}
+
 function restoreArchive(key, label) {
   if (!confirm('Зареди архив "' + label + '"?\n\nТекущите продукти ще бъдат архивирани преди зареждането.')) return;
   const fd = new FormData(); fd.append('key', key);

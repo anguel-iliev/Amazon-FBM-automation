@@ -66,6 +66,7 @@ $router->add('GET',  '/products/export',         'ProductsController',  'export'
 $router->add('GET',  '/products/template',       'ProductsController',  'template');
 $router->add('POST', '/products/debug-import',    'ProductsController',  'debugImport');
 $router->add('GET',  '/products/brands',             'ProductsController',  'brandsForSupplier');
+$router->add('POST', '/products/rebuild-cache',      'ProductsController',  'rebuildCache');
 
 // Other modules
 $router->add('GET',  '/sync',                    'SyncController',      'index');

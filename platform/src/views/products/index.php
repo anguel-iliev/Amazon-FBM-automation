@@ -89,7 +89,11 @@ $colCount = count($COLS) + 1; // +1 for Статус
 .pgt{width:max-content;min-width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed}
 .pgt thead th{position:sticky;top:0;z-index:30;background:#1A1F30;border-bottom:2px solid rgba(201,168,76,.25);padding:0;vertical-align:top;box-shadow:0 2px 0 rgba(0,0,0,.3)}
 /* Header allows wrapping */
-.th-in{display:flex;align-items:flex-start;gap:3px;padding:7px 8px;font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:rgba(255,255,255,.6);white-space:normal;word-break:break-word;line-height:1.35;border-right:1px solid rgba(255,255,255,.04);min-height:36px;cursor:pointer}
+.th-in{display:flex;align-items:flex-start;justify-content:center;gap:3px;padding:7px 8px;font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:rgba(255,255,255,.6);white-space:normal;word-break:break-word;line-height:1.35;border-right:1px solid rgba(255,255,255,.04);min-height:36px;cursor:pointer;text-align:center}
+/* Point 3: resize handle */
+.pgt th{position:relative;overflow:visible}
+.col-resize{position:absolute;right:0;top:0;bottom:0;width:5px;cursor:col-resize;z-index:50;background:transparent}
+.col-resize:hover,.col-resizing{background:rgba(201,168,76,.5)}
 .th-in:hover{color:#fff}
 .th-in.sorted{color:var(--gold)}
 .sort-ico{flex-shrink:0;font-size:8px;opacity:.7;margin-top:1px}
@@ -390,7 +394,46 @@ function renderPager(page, pages, total, pp) {
 }
 
 // ── Navigation ──────────────────────────────────────────────────
-function goPage(p)          { STATE.page=p; loadProducts(); }
+function goPage(p)          { STATE.page=p; // ── Point 3: Resizable columns ──────────────────────────────────
+function initResize() {
+  const ths = document.querySelectorAll('#pgt thead th');
+  ths.forEach(th => {
+    // Add resize handle
+    const handle = document.createElement('div');
+    handle.className = 'col-resize';
+    th.appendChild(handle);
+
+    let startX, startW;
+    handle.addEventListener('mousedown', e => {
+      e.stopPropagation();
+      startX = e.pageX;
+      startW = th.offsetWidth;
+      handle.classList.add('col-resizing');
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+
+      function onMove(e) {
+        const newW = Math.max(50, startW + (e.pageX - startX));
+        th.style.width = newW + 'px';
+        th.style.minWidth = newW + 'px';
+        th.style.maxWidth = newW + 'px';
+      }
+      function onUp() {
+        handle.classList.remove('col-resizing');
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+      }
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+  });
+}
+
+loadProducts();
+// Init resize after table renders (short delay for DOM)
+setTimeout(initResize, 500); }
 function sortBy(col)        { STATE.dir=(STATE.sort===col&&STATE.dir==='asc')?'desc':'asc'; STATE.sort=col; STATE.page=1; loadProducts(); }
 function changePerPage(val) { STATE.perpage=parseInt(val); STATE.page=1; loadProducts(); }
 

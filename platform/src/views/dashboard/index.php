@@ -44,7 +44,7 @@ if (file_exists($suppliersFile)) {
 <!-- Финансов резултат (бивш Усреднен резултат) -->
 <div class="card mt-16">
   <div class="flex-between mb-16">
-    <div class="card-title" style="margin:0">Финансов резултат (колона Y)</div>
+    <div class="card-title" style="margin:0">Финансов резултат</div>
     <a href="/products?sort=Резултат&dir=desc" class="btn btn-ghost btn-sm">Сортирай →</a>
   </div>
   <div class="grid-3" style="grid-template-columns:repeat(3,1fr)">

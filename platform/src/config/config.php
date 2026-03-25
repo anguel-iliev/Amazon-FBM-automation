@@ -20,7 +20,7 @@ define('APP_NAME',    'AMZ Retail');
 define('APP_URL',     env('APP_URL', 'https://amz-retail.tnsoft.eu'));
 define('APP_DEBUG',   env('APP_DEBUG', 'false') === 'true');
 define('TIMEZONE',    'Europe/Sofia');
-define('VERSION',     '3.0.0');
+define('VERSION',     '3.1.0');
 
 date_default_timezone_set(TIMEZONE);
 

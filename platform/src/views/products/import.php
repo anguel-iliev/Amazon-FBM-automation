@@ -167,8 +167,8 @@
               <td style="padding:8px 14px;border-bottom:1px solid var(--border);text-align:right"><?= number_format($a['count']) ?></td>
               <td style="padding:8px 14px;border-bottom:1px solid var(--border);text-align:right">
                 <div style="display:flex;gap:5px">
-                  <a href="/products/export-archive?key=<?= urlencode($a['key']) ?>" class="btn btn-ghost btn-sm" title="Свали архива като Excel файл" style="color:var(--green)">↓ .xlsx</a>
-                  <button class="btn btn-ghost btn-sm" onclick="restoreArchive('<?= htmlspecialchars($a['key']) ?>', '<?= htmlspecialchars($a['label']) ?>')">Зареди</button>
+                  <button class="btn btn-ghost btn-sm" onclick="exportArchive('<?= htmlspecialchars($a['key'], ENT_QUOTES) ?>')" title="Свали архива като Excel файл" style="color:var(--green)">↓ .xlsx</button>
+                  <button class="btn btn-ghost btn-sm" onclick="restoreArchive('<?= htmlspecialchars($a['key'], ENT_QUOTES) ?>', '<?= htmlspecialchars($a['label'], ENT_QUOTES) ?>')">Зареди</button>
                 </div>
               </td>
             </tr>
@@ -317,6 +317,20 @@ function rebuildCache(btn) {
     })
     .catch(()=>alert('✗ Мрежова грешка'))
     .finally(()=>{ btn.disabled=false; btn.textContent=orig; });
+}
+
+function exportArchive(key) {
+  // POST request — avoids all URL encoding issues with special chars in key
+  const form = document.createElement('form');
+  form.method = 'POST';
+  form.action = '/products/export-archive';
+  form.style.display = 'none';
+  const inp = document.createElement('input');
+  inp.type = 'hidden'; inp.name = 'key'; inp.value = key;
+  form.appendChild(inp);
+  document.body.appendChild(form);
+  form.submit();
+  setTimeout(() => document.body.removeChild(form), 2000);
 }
 
 function restoreArchive(key, label) {

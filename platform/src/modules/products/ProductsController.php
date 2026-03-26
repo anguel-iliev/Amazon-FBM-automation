@@ -348,23 +348,43 @@ class ProductsController {
         sort($names);
         return array_values($names);
     }
-    // ── Export archive as XLSX ────────────────────────────────
+    // ── Export archive as XLSX (POST — avoids URL encoding issues) ──
     public function exportArchive(): void {
-        $key = trim($_GET['key'] ?? '');
+        // Accept key from POST body (preferred) or GET parameter
+        $key = trim($_POST['key'] ?? $_GET['key'] ?? '');
         if (!$key) {
             http_response_code(400); echo 'Невалиден архивен ключ'; exit;
         }
 
-        // Try key as-is first, then URL-decoded (for old Cyrillic keys)
+        // Try key as-is
         $res = Firebase::get("/archive/{$key}");
+
+        // Fallback 1: URL-decode (for old keys sent via GET)
         if (!$res['ok'] || empty($res['data']['products'])) {
             $decoded = urldecode($key);
             if ($decoded !== $key) {
                 $res = Firebase::get("/archive/{$decoded}");
             }
         }
+
+        // Fallback 2: Search all archives and match by date prefix
         if (!$res['ok'] || empty($res['data']['products'])) {
-            http_response_code(404); echo 'Архивът не е намерен. Ключ: ' . htmlspecialchars($key); exit;
+            $allArchives = Firebase::get('/archive');
+            if ($allArchives['ok'] && is_array($allArchives['data'])) {
+                $datePrefix = substr($key, 0, 16); // "2026-03-25_17-07"
+                foreach ($allArchives['data'] as $archKey => $archVal) {
+                    if (str_starts_with((string)$archKey, $datePrefix)) {
+                        $res = ['ok' => true, 'data' => $archVal];
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (!$res['ok'] || empty($res['data']['products'])) {
+            http_response_code(404);
+            echo 'Архивът не е намерен. Ако проблемът продължава, направи нов импорт "Замени изцяло" за да създадеш нов архив.';
+            exit;
         }
 
         $products = array_values($res['data']['products']);

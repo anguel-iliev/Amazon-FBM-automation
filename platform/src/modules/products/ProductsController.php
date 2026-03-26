@@ -388,9 +388,15 @@ class ProductsController {
         }
 
         $products = array_values($res['data']['products']);
-        $label    = $res['data']['label'] ?? $key;
-        $date     = $res['data']['date']  ?? '';
-        $filename = 'archive_' . preg_replace('/[^a-zA-Z0-9_\-]/', '_', $key) . '.xlsx';
+        $archDate = $res['data']['date'] ?? '';
+        // Build short clean filename: archive_2026-03-25_17-07.xlsx
+        // Extract just the date+time prefix from the key (first 16 chars: "2026-03-25_17-07")
+        $datePrefix = substr($key, 0, 16);
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}$/', $datePrefix)) {
+            // Fallback: use full date from archive metadata
+            $datePrefix = $archDate ? date('Y-m-d_H-i', strtotime($archDate)) : date('Y-m-d_H-i');
+        }
+        $filename = 'archive_' . $datePrefix . '.xlsx';
 
         // Generate XLSX using simple SpreadsheetML (XML-based, no library needed)
         $headers = [

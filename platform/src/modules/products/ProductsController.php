@@ -355,10 +355,16 @@ class ProductsController {
             http_response_code(400); echo 'Невалиден архивен ключ'; exit;
         }
 
-        // Load archive from Firebase
+        // Try key as-is first, then URL-decoded (for old Cyrillic keys)
         $res = Firebase::get("/archive/{$key}");
         if (!$res['ok'] || empty($res['data']['products'])) {
-            http_response_code(404); echo 'Архивът не е намерен'; exit;
+            $decoded = urldecode($key);
+            if ($decoded !== $key) {
+                $res = Firebase::get("/archive/{$decoded}");
+            }
+        }
+        if (!$res['ok'] || empty($res['data']['products'])) {
+            http_response_code(404); echo 'Архивът не е намерен. Ключ: ' . htmlspecialchars($key); exit;
         }
 
         $products = array_values($res['data']['products']);

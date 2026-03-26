@@ -157,7 +157,6 @@
         <table style="width:100%;border-collapse:collapse;font-size:12px">
           <thead><tr>
             <th style="padding:8px 14px;text-align:left;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--border)">Дата</th>
-            <th style="padding:8px 14px;text-align:left;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--border)">Описание</th>
             <th style="padding:8px 14px;text-align:right;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--border)">Бр.</th>
             <th style="padding:8px 14px;border-bottom:1px solid var(--border)"></th>
           </tr></thead>
@@ -165,7 +164,6 @@
             <?php foreach ($archives as $a): ?>
             <tr>
               <td style="padding:8px 14px;border-bottom:1px solid var(--border);color:var(--muted);white-space:nowrap"><?= date('d.m.Y H:i', strtotime($a['date'] ?? '')) ?></td>
-              <td style="padding:8px 14px;border-bottom:1px solid var(--border);max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="<?= htmlspecialchars($a['label']) ?>"><?= htmlspecialchars($a['label']) ?></td>
               <td style="padding:8px 14px;border-bottom:1px solid var(--border);text-align:right"><?= number_format($a['count']) ?></td>
               <td style="padding:8px 14px;border-bottom:1px solid var(--border);text-align:right">
                 <div style="display:flex;gap:5px">

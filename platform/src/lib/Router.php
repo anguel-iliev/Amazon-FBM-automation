@@ -3,9 +3,10 @@ class Router {
 
     private array $routes = [];
 
-    // ONLY these routes are public — everything else requires login
+    // ONLY these routes are accessible without login — everything else is protected
     private array $publicRoutes = [
         '/',
+        '/logout',           // Must be public — user might not have valid session
         '/register',
         '/forgot-password',
         '/reset-password',
@@ -21,11 +22,18 @@ class Router {
         $uri    = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
         $uri    = rtrim($uri, '/') ?: '/';
 
-        // ── Security headers on every response ───────────────
+        // ── Security + cache headers on every response ────────
         header('X-Frame-Options: SAMEORIGIN');
         header('X-Content-Type-Options: nosniff');
         header('X-XSS-Protection: 1; mode=block');
         header('Referrer-Policy: strict-origin-when-cross-origin');
+
+        // Prevent browsers from caching protected pages
+        if (!$this->isPublicRoute($uri)) {
+            header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+            header('Pragma: no-cache');
+            header('Expires: Thu, 01 Jan 1970 00:00:00 GMT');
+        }
 
         foreach ($this->routes as $route) {
             if ($route['method'] !== $method) continue;
@@ -41,6 +49,7 @@ class Router {
             // DEFAULT: ALL routes require login
             // EXCEPTION: only explicitly listed public routes
             if (!$this->isPublicRoute($uri)) {
+                // Detect JSON/AJAX routes for appropriate 401 response
                 $isJsonRoute = str_starts_with($uri, '/api/')
                     || str_ends_with($uri, '/data')
                     || str_ends_with($uri, '/diagnose')
@@ -48,8 +57,8 @@ class Router {
                     || str_ends_with($uri, '/rebuild-cache')
                     || str_ends_with($uri, '/debug-import')
                     || str_ends_with($uri, '/update')
-                    || str_ends_with($uri, '/import')
-                    || $_SERVER['HTTP_ACCEPT'] ?? '' === 'application/json';
+                    || (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) &&
+                        strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest');
 
                 Auth::requireLogin($isJsonRoute);
             }
@@ -90,7 +99,7 @@ class Router {
     private function isPublicRoute(string $uri): bool {
         foreach ($this->publicRoutes as $pub) {
             if ($uri === $pub) return true;
-            // Allow sub-paths: /register/TOKEN, /reset-password/TOKEN etc.
+            // Allow sub-paths: /register/TOKEN, /reset-password/TOKEN
             if (str_starts_with($uri, rtrim($pub, '/') . '/')) return true;
         }
         return false;

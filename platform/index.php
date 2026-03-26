@@ -8,13 +8,11 @@ require_once SRC . '/lib/Router.php';
 require_once SRC . '/lib/Auth.php';
 require_once SRC . '/lib/Firebase.php';
 require_once SRC . '/lib/Logger.php';
-Firebase::init();
 
-// ── Start session immediately ─────────────────────────────
+// ── Start session FIRST — before any output or logic ─────
 Session::start();
 
-// ── Remove /logout from public — handle it explicitly ─────
-// Logout needs session to destroy it, not public access
+Firebase::init();
 
 // Global exception handler — always return JSON for AJAX routes
 set_exception_handler(function(\Throwable $e) {

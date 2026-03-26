@@ -9,14 +9,15 @@ class Auth {
         if (!$result['ok']) return false;
 
         $user = $result['user'];
-        // Regenerate session ID on login (prevents session fixation attack)
+        // Regenerate session ID on login — prevents session fixation
         session_regenerate_id(true);
 
-        Session::set('logged_in', true);
-        Session::set('user',      $user['email']);
-        Session::set('user_id',   $user['id']);
-        Session::set('user_role', $user['role'] ?? 'user');
-        Session::set('login_at',  time());
+        Session::set('logged_in',  true);
+        Session::set('user',       $user['email']);
+        Session::set('user_id',    $user['id']);
+        Session::set('user_role',  $user['role'] ?? 'user');
+        Session::set('login_at',   time());
+        Session::set('user_agent', substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 100));
         return true;
     }
 
@@ -24,21 +25,23 @@ class Auth {
         Session::start();
         session_regenerate_id(true);
         Session::destroy();
-        // Clear all session data
         $_SESSION = [];
     }
 
     public static function isLoggedIn(): bool {
         Session::start();
-        // Must have: logged_in flag AND user email AND login timestamp
-        if (Session::get('logged_in') !== true) return false;
-        if (empty(Session::get('user')))         return false;
-        if (empty(Session::get('login_at')))     return false;
-        // Session lifetime check (7 days)
+
+        // Must have all three markers
+        if (Session::get('logged_in') !== true)   return false;
+        if (empty(Session::get('user')))           return false;
+        if (empty(Session::get('login_at')))       return false;
+
+        // Session lifetime: 7 days
         if (time() - (int)Session::get('login_at') > SESSION_LIFE) {
             static::logout();
             return false;
         }
+
         return true;
     }
 
@@ -47,29 +50,29 @@ class Auth {
     }
 
     /**
-     * Enforce login. Always call this — never rely on Router alone.
-     * Dual protection: Router + Controller level.
+     * Enforce login. Exits if not logged in.
+     * $jsonResponse = true → return 401 JSON (for AJAX/API routes)
+     * $jsonResponse = false → redirect to login page
      */
     public static function requireLogin(bool $jsonResponse = false): void {
-        if (!static::isLoggedIn()) {
-            if ($jsonResponse) {
-                http_response_code(401);
-                header('Content-Type: application/json; charset=utf-8');
-                echo json_encode(['error' => 'Unauthorized — please login', 'redirect' => '/']);
-                exit;
-            }
-            // For AJAX requests that forgot to use /api/ prefix
-            $isAjax = !empty($_SERVER['HTTP_X_REQUESTED_WITH'])
-                   || (isset($_SERVER['HTTP_ACCEPT']) && str_contains($_SERVER['HTTP_ACCEPT'], 'application/json'));
-            if ($isAjax) {
-                http_response_code(401);
-                header('Content-Type: application/json; charset=utf-8');
-                echo json_encode(['error' => 'Unauthorized', 'redirect' => '/']);
-                exit;
-            }
-            header('Location: /');
+        if (static::isLoggedIn()) return; // already logged in — continue
+
+        if ($jsonResponse) {
+            http_response_code(401);
+            header('Content-Type: application/json; charset=utf-8');
+            header('Cache-Control: no-store');
+            echo json_encode([
+                'error'    => 'Unauthorized — моля влезте в системата',
+                'redirect' => '/',
+            ]);
             exit;
         }
+
+        // HTML page — redirect to login
+        http_response_code(302);
+        header('Cache-Control: no-store, no-cache, must-revalidate');
+        header('Location: /');
+        exit;
     }
 
     public static function requireAdmin(): void {

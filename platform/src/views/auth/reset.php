@@ -39,6 +39,7 @@ h1{font-family:'Syne',sans-serif;font-size:20px;font-weight:700;margin-bottom:8p
     <div class="error"><?= htmlspecialchars($error) ?></div>
     <?php endif; ?>
     <form method="POST" action="/reset-password">
+      <?= View::csrfField() ?>
       <input type="hidden" name="token" value="<?= htmlspecialchars($token) ?>">
       <div class="field">
         <label>Нова парола</label>

@@ -6,6 +6,7 @@ $flags = ['DE'=>'🇩🇪','FR'=>'🇫🇷','IT'=>'🇮🇹','ES'=>'🇪🇸','N
 ?>
 
 <form method="POST" action="/settings/save">
+  <?= View::csrfField() ?>
 
   <div class="grid-2" style="align-items:start">
 

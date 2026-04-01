@@ -15,6 +15,11 @@ class XlsxParser {
             return ['products' => [], 'columns' => [], 'errors' => ['Файлът не съществува']];
         }
 
+        $ext = strtolower((string)pathinfo($filePath, PATHINFO_EXTENSION));
+        if ($ext === 'csv') {
+            return static::parseCsv($filePath);
+        }
+
         if (!class_exists('ZipArchive')) {
             return ['products' => [], 'columns' => [], 'errors' => ['ZipArchive extension не е наличен']];
         }
@@ -134,6 +139,41 @@ class XlsxParser {
             'errors'   => $errors,
             'count'    => count($products),
         ];
+    }
+
+
+    private static function parseCsv(string $filePath): array {
+        $fh = @fopen($filePath, 'r');
+        if (!$fh) return ['products' => [], 'columns' => [], 'errors' => ['Грешка при четене на CSV файла']];
+        $rows = [];
+        while (($row = fgetcsv($fh, 0, ';')) !== false) {
+            if (count($row) === 1) {
+                $try = str_getcsv($row[0], ',');
+                if (count($try) > 1) $row = $try;
+            }
+            if (!$rows && isset($row[0])) $row[0] = preg_replace('/^ï»¿/u', '', (string)$row[0]);
+            $rows[] = array_map(fn($v) => trim((string)$v), $row);
+        }
+        fclose($fh);
+        if (!$rows) return ['products' => [], 'columns' => [], 'errors' => ['CSV файлът е празен']];
+        $headers = array_map('trim', $rows[0]);
+        $products = [];
+        foreach (array_slice($rows, 1) as $row) {
+            $p = [];
+            foreach ($headers as $i => $h) {
+                if ($h === '') continue;
+                $p[$h] = isset($row[$i]) ? trim((string)$row[$i]) : '';
+            }
+            $ean = trim((string)($p['EAN Amazon'] ?? ''));
+            if ($ean === '') continue;
+            if (is_numeric($ean) && str_contains($ean, '.')) {
+                $ean = rtrim(rtrim($ean, '0'), '.');
+                $p['EAN Amazon'] = $ean;
+            }
+            if (!isset($p['_upload_status'])) $p['_upload_status'] = 'NOT_UPLOADED';
+            $products[] = $p;
+        }
+        return ['products' => $products, 'columns' => $headers, 'errors' => [], 'count' => count($products)];
     }
 
     private static function colToIndex(string $col): int {

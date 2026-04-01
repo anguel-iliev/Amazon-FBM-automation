@@ -1,0 +1,14 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "products": {
+      ".read": false,
+      ".write": false
+    },
+    "archive": {
+      ".read": false,
+      ".write": false
+    }
+  }
+}

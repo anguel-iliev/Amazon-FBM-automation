@@ -75,6 +75,7 @@ $suppliers = $supplierList ?? [];
       <?php if ($payTerms): ?>
       <span class="badge badge-muted"><?= $payTerms ?></span>
       <?php endif; ?>
+      <span class="badge badge-gold">Транспорт: <?= htmlspecialchars(number_format((float)($sup['transport_to_us'] ?? 0.39),2,'.','')) ?> €</span>
     </div>
 
     <!-- Notes -->
@@ -133,6 +134,10 @@ $suppliers = $supplierList ?? [];
         <label class="form-label">Мин. поръчка (€)</label>
         <input type="number" id="sup-minorder" class="form-control" placeholder="0" step="0.01">
       </div>
+      <div class="form-group">
+        <label class="form-label">Транспорт от доставчик до нас (€)</label>
+        <input type="number" id="sup-transport" class="form-control" placeholder="0.39" step="0.01">
+      </div>
       <div class="form-group" style="grid-column:1/-1">
         <label class="form-label">Бележки</label>
         <textarea id="sup-notes" class="form-control" rows="3" placeholder="Специални условия, контакти, коментари..."></textarea>
@@ -164,6 +169,7 @@ function openAddModal() {
   });
   document.getElementById('sup-currency').value = 'EUR';
   document.getElementById('sup-minorder').value = '';
+  document.getElementById('sup-transport').value = '0.39';
   document.getElementById('sup-active').checked = true;
   document.getElementById('sup-error').style.display = 'none';
   document.getElementById('sup-modal').style.display = 'flex';
@@ -181,6 +187,7 @@ function editSupplier(id) {
   document.getElementById('sup-currency').value = sup.currency || 'EUR';
   document.getElementById('sup-payment').value = sup.payment_terms || '';
   document.getElementById('sup-minorder').value = sup.min_order || '';
+  document.getElementById('sup-transport').value = sup.transport_to_us || '0.39';
   document.getElementById('sup-notes').value = sup.notes || '';
   document.getElementById('sup-active').checked = sup.active !== false;
   document.getElementById('sup-error').style.display = 'none';
@@ -205,6 +212,7 @@ function saveSupplier() {
     currency:      document.getElementById('sup-currency').value,
     payment_terms: document.getElementById('sup-payment').value,
     min_order:     document.getElementById('sup-minorder').value,
+    transport_to_us: document.getElementById('sup-transport').value,
     notes:         document.getElementById('sup-notes').value,
     active:        document.getElementById('sup-active').checked,
   };

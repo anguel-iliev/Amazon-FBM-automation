@@ -34,6 +34,7 @@ $me      = Auth::user();
     <div class="flash flash-success" style="margin-bottom:16px"><?= htmlspecialchars($ok) ?></div>
     <?php endif; ?>
     <form method="POST" action="/invite">
+      <?= View::csrfField() ?>
       <div class="form-group">
         <label class="form-label">Имейл адрес</label>
         <input type="email" name="email" class="form-control" placeholder="user@example.com" required autofocus>
@@ -94,8 +95,18 @@ $me      = Auth::user();
           <td class="text-sm text-muted"><?= date('d.m.Y', strtotime($u['created_at'] ?? 'now')) ?></td>
           <td style="text-align:right;white-space:nowrap">
             <?php if (!($u['verified'] ?? false)): ?>
+            <?php $directInviteLink = !empty($u['verify_token']) ? (APP_URL . '/register/' . $u['verify_token']) : ''; ?>
+            <?php if ($directInviteLink): ?>
+            <button type="button" class="btn btn-ghost btn-sm"
+                    title="Копирай линк за регистрация"
+                    style="font-size:11px;padding:4px 10px;margin-right:4px"
+                    onclick="copyInviteLink('<?= htmlspecialchars($directInviteLink, ENT_QUOTES) ?>')">
+              ⧉ Копирай линк
+            </button>
+            <?php endif; ?>
             <!-- Resend invite -->
             <form method="POST" action="/invite/resend" style="display:inline">
+              <?= View::csrfField() ?>
               <input type="hidden" name="email" value="<?= htmlspecialchars($u['email']) ?>">
               <button type="submit" class="btn btn-ghost btn-sm"
                       title="Изпрати повторно"
@@ -108,6 +119,7 @@ $me      = Auth::user();
             <?php if (strtolower($u['email']) !== strtolower($me)): ?>
             <!-- Delete -->
             <form method="POST" action="/invite/delete" style="display:inline;margin-left:4px">
+              <?= View::csrfField() ?>
               <input type="hidden" name="email" value="<?= htmlspecialchars($u['email']) ?>">
               <button type="submit" class="btn btn-ghost btn-sm"
                       title="Изтрий потребител"
@@ -127,3 +139,13 @@ $me      = Auth::user();
     </table>
   </div>
 </div>
+
+<script>
+function copyInviteLink(link) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(link).then(() => alert('Линкът е копиран.'), () => prompt('Копирай линка ръчно:', link));
+  } else {
+    prompt('Копирай линка ръчно:', link);
+  }
+}
+</script>

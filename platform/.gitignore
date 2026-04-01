@@ -1,1 +1,10 @@
+# Secrets & credentials — NEVER commit these
 .env
+data/users.json
+data/rate_limits.json
+
+# Runtime data
+data/products.sqlite
+data/products_cache.json
+data/logs/
+data/.htaccess

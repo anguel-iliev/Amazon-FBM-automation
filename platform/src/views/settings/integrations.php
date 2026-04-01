@@ -1,4 +1,3 @@
-<?php $activeTab = 'integrations'; include __DIR__ . '/_tabs.php'; ?>
 <div class="grid-2" style="align-items:start">
   <div class="card">
     <div class="card-title">Firebase Realtime Database</div>
@@ -35,6 +34,11 @@
       </div>
     </div>
     <p class="text-muted text-sm" style="margin-top:12px">Автоматичната синхронизация с Google Drive ще бъде добавена в следваща версия.</p>
+  </div>
+  <div class="card" style="margin-top:16px">
+    <div class="card-title">Сигурна Firebase архитектура</div>
+    <p class="text-sm text-muted" style="line-height:1.7">Фронтендът не трябва да достъпва Firebase директно. Всички заявки към Realtime Database минават през PHP backend-а на сървъра, който използва сървърни credentials. Задай строги Firebase rules и не оставяй глобален client read/write достъп.</p>
+    <div style="margin-top:12px;font-size:12px;color:var(--muted)">Файл с примерни secure rules: <code>firebase-secure-rules.json</code></div>
   </div>
 </div>
 <script>

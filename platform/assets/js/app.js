@@ -1,6 +1,27 @@
 // AMZ Retail — Main JS
 
-// Clock
+function getCsrfToken() {
+  const meta = document.querySelector('meta[name="csrf-token"]');
+  return meta ? meta.getAttribute('content') : '';
+}
+
+const nativeFetch = window.fetch.bind(window);
+window.fetch = function(input, init = {}) {
+  const request = new Request(input, init);
+  const url = new URL(request.url, window.location.origin);
+  if (url.origin === window.location.origin) {
+    const headers = new Headers(init.headers || request.headers || {});
+    headers.set('X-Requested-With', 'XMLHttpRequest');
+    const method = (init.method || request.method || 'GET').toUpperCase();
+    if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+      const csrf = getCsrfToken();
+      if (csrf) headers.set('X-CSRF-Token', csrf);
+    }
+    init.headers = headers;
+  }
+  return nativeFetch(input, init);
+};
+
 function updateClock() {
   const el = document.getElementById('clock');
   if (!el) return;
@@ -10,21 +31,18 @@ function updateClock() {
 setInterval(updateClock, 1000);
 updateClock();
 
-// Auto-hide flash messages
 document.querySelectorAll('.flash').forEach(el => {
   setTimeout(() => el.style.opacity = '0', 3500);
   setTimeout(() => el.remove(), 4000);
   el.style.transition = 'opacity 0.5s';
 });
 
-// Confirm dialogs
 document.querySelectorAll('[data-confirm]').forEach(el => {
   el.addEventListener('click', e => {
     if (!confirm(el.dataset.confirm)) e.preventDefault();
   });
 });
 
-// AJAX helper
 async function api(url, data = null) {
   const opts = { headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' } };
   if (data) { opts.method = 'POST'; opts.body = JSON.stringify(data); }
@@ -32,7 +50,6 @@ async function api(url, data = null) {
   return res.json();
 }
 
-// Trigger sync via AJAX
 function triggerSync() {
   const btn = document.getElementById('sync-btn');
   const status = document.getElementById('sync-status');

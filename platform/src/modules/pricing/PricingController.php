@@ -1,8 +1,9 @@
 <?php
 class PricingController {
+    public function redirectVat(): void { View::redirect('/vat'); }
     public function index(): void {
         $settings = Settings::get();
-        View::renderWithLayout('pricing/index', ['pageTitle'=>'Ценообразуване','activePage'=>'pricing','settings'=>$settings,'marketplaces'=>$settings['marketplaces']??[]]);
+        View::renderWithLayout('pricing/index', ['pageTitle'=>'ДДС','activePage'=>'pricing','settings'=>$settings,'marketplaces'=>$settings['marketplaces']??[]]);
     }
     public function calculate(): void {
         $price   = (float)($_POST['price']??0);

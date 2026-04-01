@@ -3,7 +3,9 @@ class ProductsController {
 
     private static array $editableFields = [
         'Продажна Цена в Амазон  - Brutto',
+        'Цена Конкурент  - Brutto',
         'Цена Доставчик -Netto',
+        'Транспорт от Доставчик до нас',
         'Транспорт до кр. лиент  Netto',
         'Намерена 2ра обява', 'DM цена',
         'Нова цена след намаление', 'За следваща поръчка',
@@ -16,6 +18,7 @@ class ProductsController {
             $stats     = ProductDB::stats();
             $suppliers = $this->loadSupplierNames();
             $brands    = ProductDB::distinct('Бранд');
+            $stats['suppliers'] = count($suppliers);
         } catch (\Throwable $e) {
             Logger::error("Products::index: " . $e->getMessage());
             $stats = ['total'=>0,'withAsin'=>0,'notUploaded'=>0,'suppliers'=>0];
@@ -35,6 +38,7 @@ class ProductsController {
             'filters'    => $filters,
             'perPage'    => $perPage,
             'page'       => $page,
+            'columnsMeta'=> ProductDB::getAllColumnsMeta(),
         ]);
     }
 
@@ -89,7 +93,7 @@ class ProductsController {
             $value = trim($_POST['value'] ?? '');
 
             if (!$ean || !$field) { echo json_encode(['success'=>false,'error'=>'Missing params']); return; }
-            if (!in_array($field, static::$editableFields)) { echo json_encode(['success'=>false,'error'=>'Not editable']); return; }
+            if (!in_array($field, $this->editableFields(), true)) { echo json_encode(['success'=>false,'error'=>'Not editable']); return; }
 
             // Write to Firebase
             $ok = Firebase::updateProduct($ean, $field, $value);
@@ -108,7 +112,15 @@ class ProductsController {
 
     // ── Add product ───────────────────────────────────────────
     public function addPage(): void {
-        View::renderWithLayout('products/add', ['pageTitle'=>'Добави продукт','activePage'=>'products']);
+        $suppliers = $this->loadSupplierNames();
+        $brands = ProductDB::distinct('Бранд');
+        View::renderWithLayout('products/add', [
+            'pageTitle'=>'Добави продукт',
+            'activePage'=>'products',
+            'suppliers'=>$suppliers,
+            'brands'=>$brands,
+            'columnsMeta'=> ProductDB::getAllColumnsMeta(),
+        ]);
     }
 
     public function addAction(): void {
@@ -138,6 +150,33 @@ class ProductsController {
         }
     }
 
+
+    public function deleteAction(): void {
+        header('Content-Type: application/json; charset=utf-8');
+        try {
+            $scope = trim((string)($_POST['scope'] ?? 'selected'));
+            if ($scope === 'all') {
+                $fb = Firebase::deleteAllProducts();
+                if (!$fb['ok']) { echo json_encode(['success'=>false,'error'=>$fb['error'] ?? 'Firebase грешка']); return; }
+                $count = ProductDB::deleteAll();
+                Logger::audit('products.deleted_all', ['count'=>$count, 'by'=>Auth::user()['email'] ?? '']);
+                echo json_encode(['success'=>true,'deleted'=>$count]);
+                return;
+            }
+            $eans = $_POST['eans'] ?? [];
+            if (!is_array($eans)) $eans = [$eans];
+            $eans = array_values(array_filter(array_map('trim', $eans)));
+            if (!$eans) { echo json_encode(['success'=>false,'error'=>'Не са избрани продукти']); return; }
+            $fb = Firebase::deleteProductsByEans($eans);
+            if (!$fb['ok']) { echo json_encode(['success'=>false,'error'=>$fb['error'] ?? 'Firebase грешка']); return; }
+            $count = ProductDB::deleteByEans($eans);
+            Logger::audit('products.deleted', ['count'=>$count, 'by'=>Auth::user()['email'] ?? '', 'eans'=>$eans]);
+            echo json_encode(['success'=>true,'deleted'=>$count]);
+        } catch (\Throwable $e) {
+            echo json_encode(['success'=>false,'error'=>$e->getMessage()]);
+        }
+    }
+
     // ── Import page ───────────────────────────────────────────
     public function importPage(): void {
         try { $archives = Firebase::listArchives(); } catch (\Throwable $e) { $archives = []; }
@@ -154,25 +193,47 @@ class ProductsController {
     public function importAction(): void {
         header('Content-Type: application/json; charset=utf-8');
         try {
-            if (empty($_FILES['file']['tmp_name'])) { echo json_encode(['success'=>false,'error'=>'Не е избран файл']); return; }
-            if (strtolower(pathinfo($_FILES['file']['name']??'',PATHINFO_EXTENSION)) !== 'xlsx') {
-                echo json_encode(['success'=>false,'error'=>'Само .xlsx файлове']); return;
+            $upload = $_FILES['file'] ?? ($_FILES[array_key_first($_FILES ?? [])] ?? null);
+            if (!$upload || !is_array($upload)) { echo json_encode(['success'=>false,'error'=>'Не е избран файл']); return; }
+            $uploadError = (int)($upload['error'] ?? UPLOAD_ERR_OK);
+            if ($uploadError !== UPLOAD_ERR_OK) {
+                $map = [UPLOAD_ERR_INI_SIZE=>'Файлът е твърде голям за сървъра',UPLOAD_ERR_FORM_SIZE=>'Файлът е твърде голям',UPLOAD_ERR_PARTIAL=>'Файлът е качен частично',UPLOAD_ERR_NO_FILE=>'Не е избран файл',UPLOAD_ERR_NO_TMP_DIR=>'Липсва временна папка на сървъра',UPLOAD_ERR_CANT_WRITE=>'Сървърът не може да запише файла',UPLOAD_ERR_EXTENSION=>'Качването е спряно от PHP extension'];
+                echo json_encode(['success'=>false,'error'=>$map[$uploadError] ?? ('Upload error #' . $uploadError)]); return;
+            }
+            if (empty($upload['tmp_name']) || !is_uploaded_file($upload['tmp_name'])) { echo json_encode(['success'=>false,'error'=>'Не е избран файл']); return; }
+            $ext = strtolower((string)pathinfo($upload['name'] ?? '', PATHINFO_EXTENSION));
+            if (!in_array($ext, ['xlsx','csv'], true)) {
+                echo json_encode(['success'=>false,'error'=>'Само .xlsx и .csv файлове']); return;
             }
 
-            $tmpPath = DATA_DIR . '/upload_' . time() . '.xlsx';
-            if (!move_uploaded_file($_FILES['file']['tmp_name'], $tmpPath)) {
+            $tmpPath = DATA_DIR . '/upload_' . time() . '_' . bin2hex(random_bytes(3)) . '.' . $ext;
+            if (!move_uploaded_file($upload['tmp_name'], $tmpPath) && !@copy($upload['tmp_name'], $tmpPath)) {
                 echo json_encode(['success'=>false,'error'=>'Грешка при качване']); return;
             }
 
             $parsed = XlsxParser::parse($tmpPath);
             @unlink($tmpPath);
 
+            $mode  = $_POST['mode']  ?? 'first';
+            $label = trim($_POST['label'] ?? '');
+
+            if (!empty($parsed['products'])) {
+                $parsed['products'] = $this->stripFormulaColumnsFromImport($parsed['products']);
+                $parsed['products'] = $this->applySupplierTransportToProducts($parsed['products']);
+                $guard = $this->protectCriticalStaticColumns($parsed['products'], $mode, $parsed['columns'] ?? []);
+                if (!empty($guard['error'])) {
+                    echo json_encode(['success'=>false,'error'=>$guard['error']]); return;
+                }
+                $parsed['products'] = $guard['products'];
+                $supplierValidation = $this->validateImportSuppliers($parsed['products']);
+                if (empty($supplierValidation['ok'])) {
+                    echo json_encode(['success'=>false,'error'=>$this->buildUnknownSupplierError($supplierValidation['errors'])]); return;
+                }
+            }
+
             if (empty($parsed['products'])) {
                 echo json_encode(['success'=>false,'error'=>implode('; ',$parsed['errors']??['Файлът е празен'])]); return;
             }
-
-            $mode  = $_POST['mode']  ?? 'first';
-            $label = trim($_POST['label'] ?? '');
 
             if ($mode === 'first') {
                 // First import — no archive, just write
@@ -215,7 +276,7 @@ class ProductsController {
     public function restoreArchive(): void {
         header('Content-Type: application/json; charset=utf-8');
         try {
-            $key = trim($_POST['key'] ?? '');
+            $key = trim($_POST['key'] ?? $_GET['key'] ?? '');
             if (!$key) { echo json_encode(['success'=>false,'error'=>'Невалиден архив']); return; }
             Firebase::archiveCurrent('Преди възстановяване '.date('d.m.Y H:i'));
             $ok = Firebase::restoreArchive($key);
@@ -240,24 +301,62 @@ class ProductsController {
         }
     }
 
+    private function getSupplierTransportMap(): array {
+        $map = [];
+        $file = DATA_DIR . '/suppliers.json';
+        if (!file_exists($file)) return $map;
+        $rows = json_decode((string)file_get_contents($file), true);
+        if (!is_array($rows)) return $map;
+        foreach ($rows as $row) {
+            $name = trim((string)($row['name'] ?? ''));
+            if ($name === '') continue;
+            $val = trim((string)($row['transport_to_us'] ?? '0.39'));
+            if ($val === '' || !is_numeric(str_replace(',', '.', $val))) $val = '0.39';
+            $map[$name] = number_format((float)str_replace(',', '.', $val), 2, '.', '');
+        }
+        return $map;
+    }
+
+    private function applySupplierTransportToProducts(array $products): array {
+        $map = $this->getSupplierTransportMap();
+        if (!$map) return $products;
+        foreach ($products as &$p) {
+            $supplier = trim((string)($p['Доставчик'] ?? ''));
+            if ($supplier !== '' && isset($map[$supplier])) {
+                $p['Транспорт от Доставчик до нас'] = $map[$supplier];
+            }
+        }
+        unset($p);
+        return $products;
+    }
+
+    private function selectedExportEans(): array {
+        $raw = $_GET['eans'] ?? [];
+        if (is_string($raw)) {
+            $raw = array_filter(array_map('trim', explode(',', $raw)));
+        } elseif (!is_array($raw)) {
+            $raw = [];
+        }
+        return array_values(array_unique(array_filter(array_map('trim', $raw))));
+    }
+
+    private function exportProducts(): array {
+        $result = ProductDB::query([], '', 'asc', 1, 999999);
+        $products = $result['products'];
+        $eans = $this->selectedExportEans();
+        if (!$eans) return $products;
+        $indexed = [];
+        foreach ($products as $prod) { $indexed[(string)($prod['EAN Amazon'] ?? '')] = $prod; }
+        $out = [];
+        foreach ($eans as $ean) if (isset($indexed[$ean])) $out[] = $indexed[$ean];
+        return $out;
+    }
+
     // ── Export CSV ────────────────────────────────────────────
     public function export(): void {
         try {
-            $filters  = $this->parseFilters();
-            // For export we need ALL matching — no pagination
-            $result   = ProductDB::query($filters, '', 'asc', 1, 999999);
-            $products = $result['products'];
-
-            $headers = ['EAN Amazon','EAN Доставчик','Корекция  на цена','Коментар',
-                'Наше SKU','Доставчик SKU','Доставчик','Бранд','Модел','ASIN',
-                'Цена Конкурент  - Brutto','Цена Amazon  - Brutto',
-                'Продажна Цена в Амазон  - Brutto','Цена без ДДС',
-                'ДДС от продажна цена','Amazon Такси','Цена Доставчик -Netto',
-                'ДДС  от Цена Доставчик','Транспорт от Доставчик до нас',
-                'Транспорт до кр. лиент  Netto','ДДС  от Транспорт до кр. лиент',
-                'Резултат','Намерена 2ра обява','Цена за ES FR IT',
-                'DM цена','Нова цена след намаление','Доставени',
-                'За следваща поръчка','Електоника','Статус'];
+            $products = $this->exportProducts();
+            $headers = $this->exportHeaders(false, true);
 
             header('Content-Type: text/csv; charset=utf-8');
             header('Content-Disposition: attachment; filename="products_'.date('Ymd_His').'.csv"');
@@ -265,8 +364,9 @@ class ProductsController {
             fputcsv($out,$headers,';');
             foreach ($products as $p) {
                 $row=[];
-                foreach (array_slice($headers,0,29) as $h) $row[]=$p[$h]??'';
-                $row[]=$p['_upload_status']??'NOT_UPLOADED';
+                foreach ($headers as $h) {
+                    $row[] = $h === 'Статус' ? ($p['_upload_status'] ?? 'NOT_UPLOADED') : ($p[$h] ?? '');
+                }
                 fputcsv($out,$row,';');
             }
             fclose($out); exit;
@@ -275,19 +375,38 @@ class ProductsController {
         }
     }
 
+
+    public function exportXlsx(): void {
+        try {
+            $products = $this->exportProducts();
+            $headers = $this->exportHeaders(true, true);
+
+            $rows = [];
+            foreach ($products as $p) {
+                $row = $p;
+                $row['Статус'] = $p['_upload_status'] ?? 'NOT_UPLOADED';
+                $rows[] = $row;
+            }
+
+            $xlsx = $this->buildXlsx($headers, $rows, 'Products');
+            header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+            header('Content-Disposition: attachment; filename="products_' . date('Ymd_His') . '.xlsx"');
+            header('Content-Length: ' . strlen($xlsx));
+            header('Cache-Control: max-age=0');
+            echo $xlsx;
+            exit;
+        } catch (\Throwable $e) {
+            header('Content-Type: text/plain; charset=utf-8');
+            echo 'Грешка: ' . $e->getMessage();
+            exit;
+        }
+    }
+
     public function template(): void {
         header('Content-Type: text/csv; charset=utf-8');
         header('Content-Disposition: attachment; filename="products_template.csv"');
         $out=fopen('php://output','w'); fputs($out,"\xEF\xBB\xBF");
-        fputcsv($out,['EAN Amazon','EAN Доставчик','Корекция  на цена','Коментар',
-            'Наше SKU','Доставчик SKU','Доставчик','Бранд','Модел','Amazon Link','ASIN',
-            'Цена Конкурент  - Brutto','Цена Amazon  - Brutto',
-            'Продажна Цена в Амазон  - Brutto','Цена без ДДС',
-            'ДДС от продажна цена','Amazon Такси','Цена Доставчик -Netto',
-            'ДДС  от Цена Доставчик','Транспорт от Доставчик до нас',
-            'Транспорт до кр. лиент  Netto','ДДС  от Транспорт до кр. лиент',
-            'Резултат','Намерена 2ра обява','Цена за ES FR IT',
-            'DM цена','Нова цена след намаление','Доставени','За следваща поръчка','Електоника'],';');
+        fputcsv($out,$this->exportHeaders(true,false),';');
         fclose($out); exit;
     }
 
@@ -327,6 +446,155 @@ class ProductsController {
     }
 
     // ── Helpers ───────────────────────────────────────────────
+    private function stripFormulaColumnsFromImport(array $products): array {
+        $formulaColumns = array_keys(ProductDB::getFormulaMap());
+        if (!$formulaColumns) return $products;
+        foreach ($products as &$p) {
+            foreach ($formulaColumns as $col) {
+                unset($p[$col]);
+            }
+        }
+        unset($p);
+        return $products;
+    }
+
+
+    private function criticalImportColumns(): array {
+        return [
+            'Цена Доставчик -Netto',
+            'Транспорт от Доставчик до нас',
+            'Транспорт до кр. лиент  Netto',
+        ];
+    }
+
+    private function currentProductsIndex(): array {
+        $res = ProductDB::query([], '', 'asc', 1, 999999);
+        $idx = [];
+        foreach (($res['products'] ?? []) as $p) {
+            $ean = trim((string)($p['EAN Amazon'] ?? ''));
+            if ($ean !== '') $idx[$ean] = $p;
+        }
+        return $idx;
+    }
+
+    private function protectCriticalStaticColumns(array $products, string $mode, array $headers = []): array {
+        if (!$products || !in_array($mode, ['replace','first','merge'], true)) {
+            return ['products' => $products, 'warnings' => []];
+        }
+
+        $existing = $this->currentProductsIndex();
+        $headersMap = array_fill_keys(array_map('trim', $headers), true);
+        $critical = $this->criticalImportColumns();
+        $stats = [];
+        foreach ($critical as $col) {
+            $stats[$col] = [
+                'header_present' => !$headers || isset($headersMap[$col]),
+                'import_non_empty' => 0,
+                'import_blank' => 0,
+                'matching_non_empty_existing' => 0,
+                'blank_in_import' => 0,
+                'preserved' => 0,
+            ];
+        }
+
+        foreach ($products as $p) {
+            foreach ($critical as $col) {
+                $newVal = trim((string)($p[$col] ?? ''));
+                if ($newVal === '') $stats[$col]['import_blank']++;
+                else $stats[$col]['import_non_empty']++;
+            }
+        }
+
+        if ($existing) {
+            foreach ($products as &$p) {
+                $ean = trim((string)($p['EAN Amazon'] ?? ''));
+                if ($ean === '' || !isset($existing[$ean])) continue;
+                $old = $existing[$ean];
+                foreach ($critical as $col) {
+                    $oldVal = trim((string)($old[$col] ?? ''));
+                    if ($oldVal === '') continue;
+                    $stats[$col]['matching_non_empty_existing']++;
+                    $newVal = trim((string)($p[$col] ?? ''));
+                    if ($newVal === '') {
+                        $stats[$col]['blank_in_import']++;
+                        $p[$col] = $oldVal;
+                        $stats[$col]['preserved']++;
+                    }
+                }
+            }
+            unset($p);
+        }
+
+        $blocked = [];
+        foreach ($stats as $col => $s) {
+            if (!$s['header_present']) {
+                $blocked[] = $col . ' (липсва колона във файла)';
+                continue;
+            }
+
+            if (($s['import_non_empty'] ?? 0) <= 0) {
+                $blocked[] = $col . ' (всички стойности във файла са празни)';
+                continue;
+            }
+
+            if ($mode === 'replace' && ($s['matching_non_empty_existing'] ?? 0) > 0 && ($s['blank_in_import'] ?? 0) >= ($s['matching_non_empty_existing'] ?? 0)) {
+                $blocked[] = $col . ' (всички налични стойности биха станали празни)';
+            }
+        }
+
+        if ($blocked) {
+            $modeLabel = match ($mode) {
+                'first' => '„Първоначален импорт“',
+                'merge' => '„Добави само нови продукти“',
+                default => '„Замени изцяло“',
+            };
+            return [
+                'products' => $products,
+                'warnings' => $stats,
+                'error' => 'Импортът е спрян за защита на данните. Критични входни колони са празни или липсват във файла: ' . implode('; ', $blocked) . '. Попълни липсващите стойности преди ' . $modeLabel . '.',
+            ];
+        }
+
+        return ['products' => $products, 'warnings' => $stats];
+    }
+
+    private function validateImportSuppliers(array $products): array {
+        $knownSuppliers = $this->loadSupplierNames();
+        if (!$knownSuppliers) {
+            return ['ok' => true, 'errors' => []];
+        }
+
+        $knownMap = [];
+        foreach ($knownSuppliers as $name) {
+            $knownMap[trim((string)$name)] = true;
+        }
+
+        $errors = [];
+        foreach (array_values($products) as $idx => $p) {
+            $supplier = trim((string)($p['Доставчик'] ?? ''));
+            if ($supplier === '') continue;
+            if (!isset($knownMap[$supplier])) {
+                $rowNo = $idx + 2; // header is row 1
+                $errors[] = [
+                    'row' => $rowNo,
+                    'supplier' => $supplier,
+                ];
+            }
+        }
+
+        return ['ok' => empty($errors), 'errors' => $errors];
+    }
+
+    private function buildUnknownSupplierError(array $errors): string {
+        if (!$errors) return '';
+        $lines = [];
+        foreach (array_slice($errors, 0, 20) as $err) {
+            $lines[] = 'ред ' . $err['row'] . ': „' . $err['supplier'] . '“';
+        }
+        $suffix = count($errors) > 20 ? ' Показани са първите 20 несъответствия.' : '';
+        return 'Импортът е спрян. Открити са доставчици, които не съществуват в системата или не съвпадат 100% с въведените доставчици: ' . implode('; ', $lines) . '.' . $suffix;
+    }
+
     private function parseFilters(): array {
         $f = [];
         foreach (['dostavchik','brand','upload_status','elektronika','search','sort','dir'] as $k) {
@@ -340,12 +608,33 @@ class ProductsController {
         return in_array($pp, [25,50,100,250]) ? $pp : 50;
     }
 
+
+    private function editableFields(): array {
+        $editable = static::$editableFields;
+        foreach (ProductDB::getAllColumnsMeta() as $col) {
+            if (!empty($col['is_custom']) && empty($col['is_formula'])) $editable[] = $col['name'];
+        }
+        return array_values(array_unique($editable));
+    }
+
+    private function exportHeaders(bool $includeLink = true, bool $includeStatus = true): array {
+        $headers = ['EAN Amazon','EAN Доставчик','Корекция  на цена','Коментар','Наше SKU','Доставчик SKU','Доставчик','Бранд','Модел'];
+        if ($includeLink) $headers[] = 'Amazon Link';
+        $headers = array_merge($headers, ['ASIN','Цена Конкурент  - Brutto','Цена Amazon  - Brutto','Продажна Цена в Амазон  - Brutto','Цена без ДДС','ДДС от продажна цена','Amazon Такси','Цена Доставчик -Netto','ДДС  от Цена Доставчик','Транспорт от Доставчик до нас','Транспорт до кр. лиент  Netto','ДДС  от Транспорт до кр. лиент','Резултат','Намерена 2ра обява','Цена за ES FR IT','DM цена','Нова цена след намаление','Доставени','За следваща поръчка','Електоника']);
+        foreach (ProductDB::getAllColumnsMeta() as $col) {
+            if (!empty($col['is_custom'])) $headers[] = $col['name'];
+        }
+        if ($includeStatus) $headers[] = 'Статус';
+        return $headers;
+    }
+
     private function loadSupplierNames(): array {
         $file = DATA_DIR . '/suppliers.json';
         if (!file_exists($file)) return [];
         $list = json_decode(file_get_contents($file), true) ?? [];
         $names = array_map(fn($s) => $s['name'], array_filter($list, fn($s) => $s['active'] ?? true));
-        sort($names);
+        $names = array_values(array_unique(array_filter(array_map('trim', $names))));
+        natcasesort($names);
         return array_values($names);
     }
     // ── Export archive as XLSX (POST — avoids URL encoding issues) ──
@@ -411,7 +700,11 @@ class ProductsController {
             'DM цена','Нова цена след намаление','Доставени','За следваща поръчка','Електоника',
         ];
 
-        $xlsx = $this->buildXlsx($headers, $products, $label);
+        $sheetName = trim((string)($res['data']['label'] ?? ($_POST['label'] ?? $_GET['label'] ?? '')));
+        if ($sheetName === '') {
+            $sheetName = 'Archive';
+        }
+        $xlsx = $this->buildXlsx($headers, $products, $sheetName);
 
         header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         header('Content-Disposition: attachment; filename="' . $filename . '"');
@@ -426,6 +719,12 @@ class ProductsController {
      * No external libraries needed.
      */
     private function buildXlsx(array $headers, array $rows, string $sheetName = 'Products'): string {
+        $sheetName = trim($sheetName);
+        $sheetName = str_replace(['\\', '/', '?', '*', '[', ']', ':'], ' ', $sheetName);
+        $sheetName = preg_replace('/\s+/u', ' ', $sheetName) ?: 'Products';
+        $sheetName = mb_substr($sheetName, 0, 31);
+        if ($sheetName === '') $sheetName = 'Products';
+
         // Collect all strings for shared strings
         $strings  = [];
         $strIndex = [];

@@ -6,6 +6,7 @@ $sheetId  = $settings['google_sheet_id'] ?? '';
   <div></div>
   <div class="page-header-actions">
     <form method="POST" action="/sync/run">
+      <?= View::csrfField() ?>
       <button type="submit" class="btn btn-primary"
               data-confirm="Стартиране на синхронизация — това ще прочете всички файлове от Google Drive и ще обнови централната таблица. Продължи?">
         <svg width="14" height="14" viewBox="0 0 20 20" fill="none"><path d="M4 10a6 6 0 0 1 6-6 6 6 0 0 1 4.24 1.76M16 10a6 6 0 0 1-6 6 6 6 0 0 1-4.24-1.76" stroke="currentColor" stroke-width="2"/><path d="M14.24 4.76 16 3v3.5h-3.5M5.76 15.24 4 17v-3.5h3.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>

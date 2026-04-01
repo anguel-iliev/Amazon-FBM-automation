@@ -44,6 +44,7 @@ h1{font-family:'Syne',sans-serif;font-size:22px;font-weight:700;margin-bottom:8p
     <?php endif; ?>
     <div class="email-badge"><?= htmlspecialchars($email) ?></div>
     <form method="POST" action="/register">
+      <?= View::csrfField() ?>
       <input type="hidden" name="token" value="<?= htmlspecialchars($token) ?>">
       <div class="field">
         <label>Нова парола</label>

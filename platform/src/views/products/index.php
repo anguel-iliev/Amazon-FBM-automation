@@ -5,71 +5,37 @@
  * - Persistent widths + visibility + order via localStorage
  * - Column manager panel (reorder + hide/show)
  */
-$stats     = $stats     ?? [];
-$suppliers = $suppliers ?? [];
-$brands    = $brands    ?? [];
-$filters   = $filters   ?? [];
-$perPage   = $perPage   ?? 50;
-$page      = $page      ?? 1;
+$stats       = $stats       ?? [];
+$suppliers   = $suppliers   ?? [];
+$brands      = $brands      ?? [];
+$filters     = $filters     ?? [];
+$perPage     = $perPage     ?? 50;
+$page        = $page        ?? 1;
+$columnsMeta = $columnsMeta ?? ProductDB::getAllColumnsMeta();
 
-// ALL columns definition: [key, default_width]
-$ALL_COLS = [
-  ['EAN Amazon',                       130],
-  ['EAN Доставчик',                    130],
-  ['Наше SKU',                         120],
-  ['Доставчик SKU',                    120],
-  ['Доставчик',                        100],
-  ['Бранд',                             90],
-  ['Модел',                            240],
-  ['Amazon Link',                       46],
-  ['ASIN',                             120],
-  ['Цена Конкурент  - Brutto',          90],
-  ['Цена Amazon  - Brutto',             90],
-  ['Продажна Цена в Амазон  - Brutto', 110],
-  ['Цена без ДДС',                      80],
-  ['ДДС от продажна цена',              80],
-  ['Amazon Такси',                      80],
-  ['Цена Доставчик -Netto',             90],
-  ['ДДС  от Цена Доставчик',            80],
-  ['Транспорт от Доставчик до нас',     90],
-  ['Транспорт до кр. лиент  Netto',     90],
-  ['ДДС  от Транспорт до кр. лиент',    80],
-  ['Резултат',                          80],
-  ['Намерена 2ра обява',               110],
-  ['Цена за ES FR IT',                  90],
-  ['DM цена',                           80],
-  ['Нова цена след намаление',          90],
-  ['Доставени',                         70],
-  ['За следваща поръчка',               90],
-  ['Електоника',                        80],
-  ['Корекция  на цена',                 80],
-  ['Коментар',                         160],
+$coreWidths = [
+  'EAN Amazon'=>130,'EAN Доставчик'=>130,'Наше SKU'=>120,'Доставчик SKU'=>120,'Доставчик'=>100,'Бранд'=>90,'Модел'=>240,
+  'Amazon Link'=>46,'ASIN'=>120,'Цена Конкурент  - Brutto'=>110,'Цена Amazon  - Brutto'=>90,'Продажна Цена в Амазон  - Brutto'=>110,
+  'Цена без ДДС'=>80,'ДДС от продажна цена'=>80,'Amazon Такси'=>80,'Цена Доставчик -Netto'=>90,'ДДС  от Цена Доставчик'=>80,
+  'Транспорт от Доставчик до нас'=>120,'Транспорт до кр. лиент  Netto'=>90,'ДДС  от Транспорт до кр. лиент'=>80,'Резултат'=>80,
+  'Намерена 2ра обява'=>110,'Цена за ES FR IT'=>90,'DM цена'=>80,'Нова цена след намаление'=>90,'Доставени'=>70,'За следваща поръчка'=>90,
+  'Електоника'=>80,'Корекция  на цена'=>80,'Коментар'=>160,
 ];
-
-// Editable fields
-$EDITABLE = [
-  'Продажна Цена в Амазон  - Brutto',
-  'Цена Доставчик -Netto',
-  'Транспорт до кр. лиент  Netto',
-  'Намерена 2ра обява', 'DM цена',
-  'Нова цена след намаление', 'За следваща поръчка',
-  'Електоника', 'Корекция  на цена', 'Коментар',
-];
-
-// Column types
-$TYPE_MAP = [
-  'Amazon Link'  => 'link',
-  'ASIN'         => 'asin',
-  'Електоника'   => 'toggle',
-  'Резултат'     => 'result',
-];
-// Numeric columns
-$NUM_COLS = ['Цена Конкурент  - Brutto','Цена Amazon  - Brutto',
-  'Продажна Цена в Амазон  - Brutto','Цена без ДДС','ДДС от продажна цена',
-  'Amazon Такси','Цена Доставчик -Netto','ДДС  от Цена Доставчик',
-  'Транспорт от Доставчик до нас','Транспорт до кр. лиент  Netto',
-  'ДДС  от Транспорт до кр. лиент','DM цена',
-  'Нова цена след намаление','Доставени','За следваща поръчка','Корекция  на цена'];
+$ALL_COLS = [];
+foreach ($columnsMeta as $col) {
+  if (($col['name'] ?? '') === '_upload_status') continue;
+  $ALL_COLS[] = [$col['name'], $coreWidths[$col['name']] ?? 120];
+}
+$EDITABLE = ['Продажна Цена в Амазон  - Brutto','Цена Конкурент  - Brutto','Цена Доставчик -Netto','Транспорт от Доставчик до нас','Транспорт до кр. лиент  Netto','Намерена 2ра обява','DM цена','Нова цена след намаление','За следваща поръчка','Електоника','Корекция  на цена','Коментар'];
+foreach ($columnsMeta as $col) {
+  if (!empty($col['is_custom']) && empty($col['is_formula'])) $EDITABLE[] = $col['name'];
+}
+$EDITABLE = array_values(array_unique($EDITABLE));
+$TYPE_MAP = ['Amazon Link'=>'link','ASIN'=>'asin','Електоника'=>'toggle','Резултат'=>'result'];
+$NUM_COLS = ['Цена Конкурент  - Brutto','Цена Amazon  - Brutto','Продажна Цена в Амазон  - Brutto','Цена без ДДС','ДДС от продажна цена','Amazon Такси','Цена Доставчик -Netto','ДДС  от Цена Доставчик','Транспорт от Доставчик до нас','Транспорт до кр. лиент  Netto','ДДС  от Транспорт до кр. лиент','DM цена','Нова цена след намаление','Доставени','За следваща поръчка','Корекция  на цена','Резултат'];
+foreach ($columnsMeta as $col) {
+  if (($col['data_type'] ?? '') === 'number' && !in_array($col['name'], $NUM_COLS, true)) $NUM_COLS[] = $col['name'];
+}
 ?>
 <style>
 /* ── Layout ── */
@@ -101,6 +67,8 @@ $NUM_COLS = ['Цена Конкурент  - Brutto','Цена Amazon  - Brutto'
 
 /* ── Action row ── */
 .par{display:flex;justify-content:space-between;align-items:center;padding:8px 16px 0;flex-shrink:0;gap:6px;flex-wrap:wrap}
+.par-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.btn-wrap2{display:inline-flex;flex-direction:column;align-items:center;justify-content:center;line-height:1.05;text-align:center;min-height:38px;padding-top:6px;padding-bottom:6px;white-space:normal}
 .par-info{font-size:13px;color:rgba(255,255,255,.7)}
 .par-info strong{color:#fff}
 
@@ -157,14 +125,18 @@ $NUM_COLS = ['Цена Конкурент  - Brutto','Цена Amazon  - Brutto'
   padding:5px 8px;border-bottom:1px solid rgba(255,255,255,.04);
   vertical-align:middle;color:#E8E6E1;font-size:13px;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
-  max-width:0;border-right:1px solid rgba(255,255,255,.02);height:34px
+  max-width:0;border-right:1px solid rgba(255,255,255,.02);height:34px;
+  text-align:center
 }
 .pgt tbody tr:last-child td{border-bottom:none}
-td.cn{text-align:right;font-variant-numeric:tabular-nums}
-td.cm{font-family:monospace;font-size:12px;color:rgba(232,230,225,.65)}
+td.cn{text-align:center;font-variant-numeric:tabular-nums}
+td.cm{text-align:center;font-family:monospace;font-size:12px;color:rgba(232,230,225,.65)}
 td.cl{text-align:center}
-td.cr{text-align:right;font-variant-numeric:tabular-nums;font-weight:700}
+td.cc{text-align:center;font-variant-numeric:tabular-nums}
+td.cr{text-align:center;font-variant-numeric:tabular-nums;font-weight:700}
 td.cr.pos{color:#5DCCA0}td.cr.neg{color:#E05C5C}td.cr.zer{color:rgba(255,255,255,.25)}
+td.ct{text-align:center}
+.sel-col{width:42px;min-width:42px}.sel-box{width:16px;height:16px;accent-color:var(--gold);cursor:pointer}.btn-danger{background:rgba(224,92,92,.16);border:1px solid rgba(224,92,92,.38);color:#ff8b8b}.btn-danger:hover{background:rgba(224,92,92,.26);color:#fff}.par-actions .btn-sm{position:relative}
 td.ed{cursor:text;position:relative}
 td.ed::after{content:'';position:absolute;bottom:2px;left:6px;right:6px;height:1px;background:rgba(201,168,76,.2)}
 td.ed:hover{background:rgba(201,168,76,.05)!important}td.ed:hover::after{background:rgba(201,168,76,.5)}
@@ -283,15 +255,15 @@ td.ed:hover{background:rgba(201,168,76,.05)!important}td.ed:hover::after{backgro
 <!-- Action row -->
 <div class="par">
   <div class="par-info" id="par-info">Зареждане…</div>
-  <div style="display:flex;gap:6px;align-items:center">
-    <a href="/products/add" class="btn btn-ghost btn-sm">+ Добави</a>
+  <div class="par-actions">
+    <a href="/products/add" class="btn btn-ghost btn-sm btn-wrap2">+ Добави<br>продукт</a>
+    <button type="button" id="delete-btn" class="btn btn-danger btn-sm" onclick="deleteSelected()" disabled>Изтрий</button>
+    <button type="button" class="btn btn-ghost btn-sm btn-wrap2" onclick="openColMgr()">Колони</button>
+    <button type="button" class="btn btn-ghost btn-sm" onclick="selectAllPage()">Всички на стр.</button>
+    <button type="button" class="btn btn-ghost btn-sm" onclick="toggleSelectAllDb()" id="sel-all-db-btn">Всички в базата</button>
     <a href="/products/import" class="btn btn-ghost btn-sm">↑ Import</a>
     <a id="export-btn" href="/products/export" class="btn btn-ghost btn-sm">↓ CSV</a>
-    <!-- Point 3: Column Manager Button -->
-    <button class="btn btn-ghost btn-sm" onclick="openColMgr()" title="Управление на колони" style="gap:5px">
-      <svg width="13" height="13" viewBox="0 0 20 20" fill="none"><path d="M3 5h14M3 10h14M3 15h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><rect x="7" y="3" width="2" height="4" rx="1" fill="currentColor"/><rect x="11" y="8" width="2" height="4" rx="1" fill="currentColor"/><rect x="7" y="13" width="2" height="4" rx="1" fill="currentColor"/></svg>
-      Колони
-    </button>
+    <a id="export-xlsx-btn" href="/products/export-xlsx" class="btn btn-ghost btn-sm">↓ XLSX</a>
   </div>
 </div>
 
@@ -300,7 +272,7 @@ td.ed:hover{background:rgba(201,168,76,.05)!important}td.ed:hover::after{backgro
 <table class="pgt" id="pgt">
   <thead><tr id="thead-row"></tr></thead>
   <tbody id="tbody">
-    <tr class="loading-row"><td colspan="31"><div style="display:flex;align-items:center;justify-content:center;gap:10px"><span class="spinner"></span> Зареждане…</div></td></tr>
+    <tr class="loading-row"><td colspan="32"><div style="display:flex;align-items:center;justify-content:center;gap:10px"><span class="spinner"></span> Зареждане…</div></td></tr>
   </tbody>
 </table>
 </div>
@@ -327,6 +299,7 @@ td.ed:hover{background:rgba(201,168,76,.05)!important}td.ed:hover::after{backgro
       <button onclick="closeColMgr()" style="background:none;border:none;color:rgba(255,255,255,.5);cursor:pointer;font-size:18px;line-height:1;padding:2px 6px">✕</button>
     </div>
     <div class="col-mgr-actions">
+      <button class="btn btn-ghost btn-sm" onclick="addCustomColumn()">+ Нова колона</button>
       <button class="btn btn-ghost btn-sm" onclick="showAllCols()">Покажи всички</button>
       <button class="btn btn-ghost btn-sm" onclick="resetColSettings()">Нулирай</button>
     </div>
@@ -352,6 +325,12 @@ const ALL_COLS_DEF = <?= json_encode(array_map(fn($c) => ['key'=>$c[0],'width'=>
 const EDITABLE_COLS = <?= json_encode($EDITABLE, JSON_UNESCAPED_UNICODE) ?>;
 const NUM_COLS      = <?= json_encode($NUM_COLS, JSON_UNESCAPED_UNICODE) ?>;
 const TYPE_MAP      = <?= json_encode($TYPE_MAP, JSON_UNESCAPED_UNICODE) ?>;
+const CENTER_COLS   = ['EAN Amazon','EAN Доставчик','Наше SKU','Доставчик SKU'];
+const CSRF_TOKEN = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+function csrfHeaders(extra = {}) {
+  return Object.assign({'X-CSRF-Token': CSRF_TOKEN}, extra);
+}
+
 
 // ── Load settings ─────────────────────────────────────────
 function loadColSettings() {
@@ -369,30 +348,40 @@ function saveColSettings(settings) {
 
 // ── Get current effective columns ─────────────────────────
 // Returns array of {key, width, visible} in current order
+function getAllCols() {
+  const settings = loadColSettings() || {};
+  const widths   = settings.widths || {};
+  const hidden   = settings.hidden || [];
+  const order    = settings.order || ALL_COLS_DEF.map(c => c.key);
+
+  const cols = ALL_COLS_DEF.map(c => ({
+    key: c.key,
+    width: widths[c.key] || c.width,
+    visible: !hidden.includes(c.key),
+  }));
+
+  cols.sort((a, b) => {
+    const ai = order.indexOf(a.key);
+    const bi = order.indexOf(b.key);
+    const av = ai === -1 ? Number.MAX_SAFE_INTEGER : ai;
+    const bv = bi === -1 ? Number.MAX_SAFE_INTEGER : bi;
+    return av - bv || a.key.localeCompare(b.key);
+  });
+
+  return cols;
+}
+
 function getActiveCols() {
-  const settings = loadColSettings();
-  if (!settings) {
-    return ALL_COLS_DEF.map(c => ({ key: c.key, width: c.width, visible: true }));
-  }
-
-  const order   = settings.order   || ALL_COLS_DEF.map(c => c.key);
-  const widths  = settings.widths  || {};
-  const hidden  = settings.hidden  || [];
-
-  return order.map(key => {
-    const def = ALL_COLS_DEF.find(c => c.key === key);
-    return {
-      key,
-      width:   widths[key] || (def ? def.width : 100),
-      visible: !hidden.includes(key),
-    };
-  }).filter(c => ALL_COLS_DEF.find(d => d.key === c.key)); // filter removed cols
+  return getAllCols().filter(c => c.visible);
 }
 
 // ═══════════════════════════════════════════════════════════
 //  TABLE STATE
 // ═══════════════════════════════════════════════════════════
 const STATE = {
+  selected: {},
+  selectAllDb: false,
+  currentProducts: [],
   dostavchik:    <?= json_encode($filters['dostavchik']    ?? '') ?>,
   brand:         <?= json_encode($filters['brand']         ?? '') ?>,
   upload_status: <?= json_encode($filters['upload_status'] ?? '') ?>,
@@ -403,6 +392,16 @@ const STATE = {
   perpage:       <?= (int)$perPage ?>,
 };
 
+function updateExportButtons(){
+  const csvBtn=document.getElementById('export-btn');
+  const xlsxBtn=document.getElementById('export-xlsx-btn');
+  if(!csvBtn || !xlsxBtn) return;
+  const selected=Object.keys(STATE.selected);
+  const qs=selected.length ? ('?eans=' + encodeURIComponent(selected.join(','))) : '';
+  csvBtn.href='/products/export'+qs;
+  xlsxBtn.href='/products/export-xlsx'+qs;
+}
+
 // ═══════════════════════════════════════════════════════════
 //  BUILD HEADER
 // ═══════════════════════════════════════════════════════════
@@ -410,6 +409,11 @@ function buildHeader() {
   const cols = getActiveCols().filter(c => c.visible);
   const tr   = document.getElementById('thead-row');
   tr.innerHTML = '';
+
+  const selTh = document.createElement('th');
+  selTh.className = 'sel-col';
+  selTh.innerHTML = '<div class="th-in" style="cursor:default"><input type="checkbox" class="sel-box" id="sel-page-top" onclick="toggleHeaderSelect(this.checked)"></div>';
+  tr.appendChild(selTh);
 
   cols.forEach(col => {
     const key      = col.key;
@@ -498,19 +502,17 @@ function startResize(e) {
 function loadProducts() {
   const tbody = document.getElementById('tbody');
   const cols  = getActiveCols().filter(c => c.visible);
-  tbody.innerHTML = '<tr class="loading-row"><td colspan="' + (cols.length + 1) + '"><div style="display:flex;align-items:center;justify-content:center;gap:10px"><span class="spinner"></span> Зареждане…</div></td></tr>';
+  tbody.innerHTML = '<tr class="loading-row"><td colspan="' + (cols.length + 2) + '"><div style="display:flex;align-items:center;justify-content:center;gap:10px"><span class="spinner"></span> Зареждане…</div></td></tr>'; updateDeleteBtn();
   document.getElementById('pgp').style.display = 'none';
 
   buildHeader();
 
   const params = new URLSearchParams();
-  Object.entries(STATE).forEach(([k,v]) => { if(v!==''&&v!==null) params.set(k,v); });
+  ['dostavchik','brand','upload_status','search','sort','dir','page','perpage'].forEach(k => { const v = STATE[k]; if(v!=='' && v!==null && v!==undefined) params.set(k, v); });
 
-  const ep = new URLSearchParams(params);
-  ep.delete('page'); ep.delete('perpage');
-  document.getElementById('export-btn').href = '/products/export?' + ep.toString();
+  updateExportButtons();
 
-  fetch('/products/data?' + params.toString())
+  fetch('/products/data?' + params.toString(), {headers: csrfHeaders()})
     .then(r => r.text().then(text => {
       let d; try { d = JSON.parse(text); } catch(e) { throw new Error('Сървърът върна HTML:\n' + text.substring(0,300)); }
       return d;
@@ -524,7 +526,7 @@ function loadProducts() {
           msg += '<br>• Secret дължина: ' + (data.diag.secret_len||0) + ' (трябва ~40)';
         }
         msg += '<br><br><a href="/products/diagnose" target="_blank" style="color:var(--gold)">Диагностика →</a>';
-        tbody.innerHTML = '<tr class="error-row"><td colspan="' + (cols.length+1) + '" style="padding:24px!important">' + msg + '</td></tr>';
+        tbody.innerHTML = '<tr class="error-row"><td colspan="' + (cols.length+2) + '" style="padding:24px!important">' + msg + '</td></tr>'; updateDeleteBtn();
         document.getElementById('par-info').innerHTML = '<span style="color:var(--red)">✗ Грешка</span>';
         return;
       }
@@ -533,12 +535,13 @@ function loadProducts() {
     })
     .catch(err => {
       const msg = escH(err.message).replace(/\n/g,'<br>');
-      tbody.innerHTML = '<tr class="error-row"><td colspan="' + (cols.length+1) + '" style="padding:24px!important;font-size:13px"><strong>✗ Грешка:</strong><br><br>' + msg + '</td></tr>';
+      tbody.innerHTML = '<tr class="error-row"><td colspan="' + (cols.length+2) + '" style="padding:24px!important;font-size:13px"><strong>✗ Грешка:</strong><br><br>' + msg + '</td></tr>'; updateDeleteBtn();
       document.getElementById('par-info').innerHTML = '<span style="color:var(--red)">✗ Грешка</span>';
     });
 }
 
 function renderTable(products, meta) {
+  STATE.currentProducts = products || [];
   const tbody  = document.getElementById('tbody');
   const total  = meta.total, page = meta.page, pages = meta.pages, pp = meta.perPage;
   const from   = total > 0 ? (page-1)*pp+1 : 0;
@@ -550,7 +553,7 @@ function renderTable(products, meta) {
     : '<span style="color:rgba(255,255,255,.4)">Няма продукти</span>';
 
   if (!products.length) {
-    tbody.innerHTML = '<tr class="empty-row"><td colspan="' + (cols.length+1) + '">Няма намерени продукти.<br><small><a href="/products/import" style="color:var(--gold)">Импортирай Excel →</a></small></td></tr>';
+    tbody.innerHTML = '<tr class="empty-row"><td colspan="' + (cols.length+2) + '">Няма намерени продукти.<br><small><a href="/products/import" style="color:var(--gold)">Импортирай файл →</a></small></td></tr>'; updateDeleteBtn();
     document.getElementById('pgp').style.display = 'none';
     return;
   }
@@ -564,7 +567,9 @@ function renderTable(products, meta) {
     const res    = parseFloat(p['Резултат'] || '0') || 0;
     const resC   = res > 0 ? 'pos' : (res < 0 ? 'neg' : 'zer');
 
+    const checked = !!STATE.selected[String(p['EAN Amazon'] || '')];
     html += '<tr data-ean="' + eanH + '">';
+    html += `<td class="cl sel-col"><input type="checkbox" class="sel-box row-sel" data-ean="${eanH}" ${checked ? 'checked' : ''} onchange="toggleRowSelection(this)"></td>`;
 
     for (const col of cols) {
       const key      = col.key;
@@ -587,13 +592,16 @@ function renderTable(products, meta) {
         const n = raw !== '' ? parseFloat(raw) : null;
         html += `<td class="cn${editable?' ed':''}"${attr}>${n !== null && !isNaN(n) ? fmtNum(n) : (valH||'')}</td>`;
       } else {
-        html += `<td class="ct${editable?' ed':''}"${attr} title="${valH}">${valH}</td>`;
+        const textClass = CENTER_COLS.includes(key) ? 'cc' : 'ct';
+        html += `<td class="${textClass}${editable?' ed':''}"${attr} title="${valH}">${valH}</td>`;
       }
     }
     html += `<td class="cl"><span class="bg ${status==='UPLOADED'?'bg-g':'bg-a'}">${status==='UPLOADED'?'Качен':'Не качен'}</span></td>`;
     html += '</tr>';
   }
   tbody.innerHTML = html;
+  syncHeaderCheckbox();
+  updateDeleteBtn();
   renderPager(page, pages, total, pp);
 }
 
@@ -621,7 +629,7 @@ let dragSrc = null;
 function openColMgr() {
   const overlay = document.getElementById('col-mgr');
   const list    = document.getElementById('col-mgr-list');
-  const cols    = getActiveCols();
+  const cols    = getAllCols();
   overlay.style.display = 'flex';
 
   list.innerHTML = '';
@@ -704,6 +712,17 @@ function resetColSettings() {
 }
 
 // ═══════════════════════════════════════════════════════════
+//  SELECTION + DELETE
+// ═══════════════════════════════════════════════════════════
+function toggleRowSelection(el){ const ean = el.dataset.ean; if(!ean) return; if(el.checked) STATE.selected[ean]=true; else delete STATE.selected[ean]; STATE.selectAllDb=false; const b=document.getElementById('sel-all-db-btn'); if(b) b.textContent='Всички в базата'; syncHeaderCheckbox(); updateDeleteBtn(); updateExportButtons(); }
+function toggleHeaderSelect(checked){ document.querySelectorAll('.row-sel').forEach(cb=>{ cb.checked=checked; const ean=cb.dataset.ean; if(checked) STATE.selected[ean]=true; else delete STATE.selected[ean]; }); STATE.selectAllDb=false; const b=document.getElementById('sel-all-db-btn'); if(b) b.textContent='Всички в базата'; updateDeleteBtn(); updateExportButtons(); }
+function syncHeaderCheckbox(){ const top=document.getElementById('sel-page-top'); if(!top) return; const boxes=[...document.querySelectorAll('.row-sel')]; const checked=boxes.filter(b=>b.checked).length; top.checked=boxes.length>0 && checked===boxes.length; top.indeterminate=checked>0 && checked<boxes.length; }
+function selectAllPage(){ toggleHeaderSelect(true); }
+function toggleSelectAllDb(){ STATE.selectAllDb=!STATE.selectAllDb; if(STATE.selectAllDb){ STATE.selected={}; document.querySelectorAll('.row-sel').forEach(cb=>cb.checked=false); } const b=document.getElementById('sel-all-db-btn'); if(b) b.textContent = STATE.selectAllDb ? 'Отмени всички в базата' : 'Всички в базата'; syncHeaderCheckbox(); updateDeleteBtn(); updateExportButtons(); }
+function updateDeleteBtn(){ const btn=document.getElementById('delete-btn'); if(!btn) return; const count=Object.keys(STATE.selected).length; btn.disabled = !(STATE.selectAllDb || count>0); btn.textContent = STATE.selectAllDb ? 'Изтрий всички' : (count>0 ? `Изтрий (${count})` : 'Изтрий'); }
+function deleteSelected(){ const all=STATE.selectAllDb; const eans=Object.keys(STATE.selected); if(!all && !eans.length){ toast('Избери продукти', true); return; } const msg = all ? 'Сигурен ли си, че искаш да изтриеш ВСИЧКИ продукти от базата?' : `Сигурен ли си, че искаш да изтриеш ${eans.length} продукта?`; if(!confirm(msg)) return; const fd=new FormData(); fd.append('scope', all ? 'all' : 'selected'); if(!all) eans.forEach(e=>fd.append('eans[]', e)); fetch('/products/delete',{method:'POST',headers: csrfHeaders(),body:fd}).then(r=>r.json()).then(d=>{ if(!d.success) throw new Error(d.error||'Грешка'); STATE.selected={}; STATE.selectAllDb=false; const b=document.getElementById('sel-all-db-btn'); if(b) b.textContent='Всички в базата'; updateDeleteBtn(); toast(`✓ Изтрити ${d.deleted}`, false); loadProducts(); }).catch(e=>toast('✗ '+e.message,true)); }
+
+// ═══════════════════════════════════════════════════════════
 //  NAVIGATION
 // ═══════════════════════════════════════════════════════════
 function goPage(p)          { STATE.page=p; loadProducts(); }
@@ -728,7 +747,7 @@ function clearFilters() {
 function updateBrands(supplier) {
   const sel = document.getElementById('f-brand');
   const cur = sel.value;
-  fetch('/products/brands?supplier=' + encodeURIComponent(supplier))
+  fetch('/products/brands?supplier=' + encodeURIComponent(supplier), {headers: csrfHeaders()})
     .then(r => r.json()).then(d => {
       if (!d.ok) return;
       sel.innerHTML = '<option value="">— Всички —</option>';
@@ -764,7 +783,7 @@ function editCell(td) {
 }
 function saveCell(ean,field,value) {
   const fd=new FormData(); fd.append('ean',ean); fd.append('field',field); fd.append('value',value);
-  fetch('/products/update',{method:'POST',body:fd}).then(r=>r.json())
+  fetch('/products/update',{method:'POST',headers: csrfHeaders(),body:fd}).then(r=>r.json())
     .then(d=>toast(d.success?'✓ Запазено':'✗ '+(d.error||'Грешка'),!d.success))
     .catch(()=>toast('✗ Мрежова грешка',true));
 }
@@ -786,6 +805,8 @@ document.addEventListener('keydown',e=>{
   if((e.ctrlKey||e.metaKey)&&e.key==='f'){e.preventDefault();document.getElementById('f-search').focus();}
   if(e.key==='Escape')closeColMgr();
 });
+
+function addCustomColumn(){ const name = prompt('Име на новата колона'); if(!name) return; const fd = new FormData(); fd.append('name', name.trim()); fetch('/settings/add-column',{method:'POST',headers:{'X-CSRF-Token': CSRF_TOKEN},body:fd}).then(r=>r.json()).then(d=>{ if(!d.ok && !d.success) throw new Error(d.error||'Грешка'); location.reload(); }).catch(e=>alert(e.message)); }
 
 // ── INIT ──────────────────────────────────────────────────
 loadProducts();

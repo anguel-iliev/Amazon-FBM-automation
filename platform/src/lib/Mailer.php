@@ -22,7 +22,7 @@ class Mailer {
         $host = SMTP_HOST;
         $port = SMTP_PORT;
         $user = SMTP_USER;
-        $pass = SMTP_PASS;
+        $pass = preg_replace('/\s+/', '', (string) SMTP_PASS);
         $from = SMTP_FROM ?: $user;
         $name = SMTP_FROM_NAME;
 
@@ -44,9 +44,18 @@ class Mailer {
             static::read($socket);
 
             static::write($socket, "STARTTLS");
-            static::read($socket);
+            $tlsResp = static::read($socket);
+            if (strpos($tlsResp, '220') === false) {
+                Logger::error("Mailer: STARTTLS failed — {$tlsResp}");
+                fclose($socket);
+                return static::fallbackMail($to, $subject, $htmlBody, $from, $name);
+            }
 
-            stream_socket_enable_crypto($socket, true, STREAM_CRYPTO_METHOD_TLSv1_2_CLIENT);
+            if (!stream_socket_enable_crypto($socket, true, STREAM_CRYPTO_METHOD_TLS_CLIENT)) {
+                Logger::error("Mailer: TLS crypto negotiation failed");
+                fclose($socket);
+                return static::fallbackMail($to, $subject, $htmlBody, $from, $name);
+            }
 
             static::write($socket, "EHLO amz-retail.tnsoft.eu");
             static::read($socket);
@@ -65,13 +74,28 @@ class Mailer {
             }
 
             static::write($socket, "MAIL FROM:<{$from}>");
-            static::read($socket);
+            $mailFromResp = static::read($socket);
+            if (strpos($mailFromResp, '250') === false) {
+                Logger::error("Mailer: MAIL FROM failed — {$mailFromResp}");
+                fclose($socket);
+                return static::fallbackMail($to, $subject, $htmlBody, $from, $name);
+            }
 
             static::write($socket, "RCPT TO:<{$to}>");
-            static::read($socket);
+            $rcptResp = static::read($socket);
+            if (!preg_match('/^(250|251)/m', $rcptResp)) {
+                Logger::error("Mailer: RCPT TO failed for {$to} — {$rcptResp}");
+                fclose($socket);
+                return false;
+            }
 
             static::write($socket, "DATA");
-            static::read($socket);
+            $dataResp = static::read($socket);
+            if (strpos($dataResp, '354') === false) {
+                Logger::error("Mailer: DATA failed — {$dataResp}");
+                fclose($socket);
+                return static::fallbackMail($to, $subject, $htmlBody, $from, $name);
+            }
 
             $boundary = md5(uniqid());
             $date     = date('r');
@@ -82,6 +106,8 @@ class Mailer {
             $message .= "To: {$to}\r\n";
             $message .= "Subject: =?UTF-8?B?" . base64_encode($subject) . "?=\r\n";
             $message .= "Message-ID: {$msgId}\r\n";
+            $message .= "Reply-To: {$from}\r\n";
+            $message .= "X-Mailer: AMZ Retail SMTP\r\n";
             $message .= "MIME-Version: 1.0\r\n";
             $message .= "Content-Type: multipart/alternative; boundary=\"{$boundary}\"\r\n";
             $message .= "\r\n";
@@ -95,7 +121,12 @@ class Mailer {
             $message .= "\r\n.";
 
             static::write($socket, $message);
-            static::read($socket);
+            $sendResp = static::read($socket);
+            if (strpos($sendResp, '250') === false) {
+                Logger::error("Mailer: message send failed — {$sendResp}");
+                fclose($socket);
+                return static::fallbackMail($to, $subject, $htmlBody, $from, $name);
+            }
 
             static::write($socket, "QUIT");
             fclose($socket);
@@ -107,6 +138,24 @@ class Mailer {
             Logger::error("Mailer exception: " . $e->getMessage());
             return false;
         }
+    }
+
+
+    private static function fallbackMail($to, $subject, $htmlBody, $from, $name) {
+        if (!function_exists('mail')) {
+            Logger::error("Mailer fallback unavailable: native mail() missing");
+            return false;
+        }
+
+        $headers = [];
+        $headers[] = 'MIME-Version: 1.0';
+        $headers[] = 'Content-type: text/html; charset=UTF-8';
+        $headers[] = 'From: =?UTF-8?B?' . base64_encode($name) . '?= <' . $from . '>' ;
+        $headers[] = 'Reply-To: ' . $from;
+
+        $ok = @mail($to, '=?UTF-8?B?' . base64_encode($subject) . '?=', $htmlBody, implode("\r\n", $headers));
+        Logger::warn('Mailer fallback mail() used for ' . $to . ' result=' . ($ok ? 'ok' : 'fail'));
+        return $ok;
     }
 
     private static function write($socket, $cmd) {

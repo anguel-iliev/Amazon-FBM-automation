@@ -49,6 +49,8 @@ class Settings {
             'sync_auto'       => true,
             'google_sheet_id' => '',
             'drive_folder_id' => env('GOOGLE_DRIVE_FOLDER_ID', ''),
+            'formulas'        => [],
+            'formulas_locked' => false,
         ];
     }
 }

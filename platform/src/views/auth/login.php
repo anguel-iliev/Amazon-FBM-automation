@@ -65,7 +65,7 @@ html, body { width:100%;height:100%;overflow:hidden;font-family:'DM Sans',sans-s
     <p class="brand-sub">Автоматизирано управление на доставчици, продукти и ценообразуване за Amazon FBM пазари в Европа.</p>
     <div class="brand-stats">
       <div class="stat"><div class="stat-val">7</div><div class="stat-label">Пазара</div></div>
-      <div class="stat"><div class="stat-val">22</div><div class="stat-label">Доставчика</div></div>
+      <div class="stat"><div class="stat-val"><?= (int)($supplierCount ?? 0) ?></div><div class="stat-label">Доставчика</div></div>
     </div>
   </div>
   <div class="login-panel">
@@ -79,6 +79,7 @@ html, body { width:100%;height:100%;overflow:hidden;font-family:'DM Sans',sans-s
       <div style="background:rgba(61,187,127,0.12);border:1px solid rgba(61,187,127,0.3);border-radius:4px;padding:12px 16px;font-size:13px;color:#5DCCA0;margin-bottom:20px"><?= htmlspecialchars($success) ?></div>
       <?php endif; ?>
       <form method="POST" action="/" autocomplete="off">
+        <?= View::csrfField() ?>
         <div class="field">
           <label>Имейл</label>
           <input type="email" name="email" placeholder="you@example.com" autocomplete="email" required>

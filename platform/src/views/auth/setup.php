@@ -88,6 +88,7 @@ body{display:flex;align-items:center;justify-content:center;padding:24px}
     <?php endif; ?>
 
     <form method="POST" action="/setup" autocomplete="off">
+      <?= View::csrfField() ?>
 
       <div class="field">
         <label>Имейл адрес</label>

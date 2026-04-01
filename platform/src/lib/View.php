@@ -41,4 +41,9 @@ class View {
     public static function escape($value) {
         return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
     }
+
+    public static function csrfField(): string {
+        return Security::csrfField();
+    }
 }
+

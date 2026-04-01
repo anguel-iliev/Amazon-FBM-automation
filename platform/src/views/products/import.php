@@ -11,18 +11,20 @@
 <div class="grid-2" style="align-items:start;gap:20px">
 
   <div class="card">
-    <div class="card-title">Импортирай Excel файл</div>
+    <div class="card-title">Импортирай файл</div>
 
-    <input type="file" id="file-inp" accept=".xlsx" style="display:none" onchange="onFileChosen(this)">
+    <form id="import-upload-form" enctype="multipart/form-data" onsubmit="return false;">
+    <input type="file" id="file-inp" name="file" accept=".xlsx,.csv" style="display:none" onchange="onFileChosen(this)">
+    </form>
 
     <!-- STEP 1: Choose file -->
     <div id="step-choose">
       <p class="text-sm text-muted" style="margin-bottom:16px;line-height:1.7">
-        Натисни бутона за да избереш .xlsx файл от компютъра си.
+        Натисни бутона за да избереш .xlsx или .csv файл от компютъра си.
       </p>
       <button class="btn btn-primary" style="width:100%;padding:16px;font-size:15px;font-weight:700" onclick="document.getElementById('file-inp').click()">
         <svg width="18" height="18" viewBox="0 0 20 20" fill="none" style="margin-right:8px;vertical-align:middle"><path d="M4 6v-2a1 1 0 011-1h10a1 1 0 011 1v2M10 17V7M7 10l3-3 3 3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        Избери Excel файл (.xlsx)
+        Избери файл (.xlsx / .csv)
       </button>
       <p class="text-sm text-muted" style="margin-top:10px;text-align:center;opacity:.6">или провлачи файла върху тази страница</p>
     </div>
@@ -166,8 +168,8 @@
               <td style="padding:8px 14px;border-bottom:1px solid var(--border);color:var(--muted);white-space:nowrap"><?= date('d.m.Y H:i', strtotime($a['date'] ?? '')) ?></td>
               <td style="padding:8px 14px;border-bottom:1px solid var(--border);text-align:right"><?= number_format($a['count']) ?></td>
               <td style="padding:8px 14px;border-bottom:1px solid var(--border);text-align:right">
-                <div style="display:flex;gap:5px">
-                  <button class="btn btn-ghost btn-sm" onclick="exportArchive('<?= htmlspecialchars($a['key'], ENT_QUOTES) ?>')" title="Свали архива като Excel файл" style="color:var(--green)">↓ .xlsx</button>
+                <div style="display:flex;gap:5px;justify-content:flex-end">
+                  <button class="btn btn-ghost btn-sm" onclick="exportArchive('<?= htmlspecialchars($a['key'], ENT_QUOTES) ?>', '<?= htmlspecialchars($a['label'] ?? '', ENT_QUOTES) ?>')" title="Свали архива като Excel файл" style="color:var(--green)">↓ .xlsx</button>
                   <button class="btn btn-ghost btn-sm" onclick="restoreArchive('<?= htmlspecialchars($a['key'], ENT_QUOTES) ?>', '<?= htmlspecialchars($a['label'], ENT_QUOTES) ?>')">Зареди</button>
                 </div>
               </td>
@@ -191,7 +193,7 @@ document.addEventListener('drop', e => {
   e.preventDefault();
   const f = e.dataTransfer.files[0];
   if (!f) return;
-  if (!f.name.toLowerCase().endsWith('.xlsx')) { alert('Само .xlsx файлове!'); return; }
+  if (!/\.(xlsx|csv)$/i.test(f.name)) { alert('Само .xlsx и .csv файлове!'); return; }
   selectedFile = f;
   showFileInfo(f);
 });
@@ -199,7 +201,7 @@ document.addEventListener('drop', e => {
 function onFileChosen(inp) {
   const f = inp.files[0];
   if (!f) return;
-  if (!f.name.toLowerCase().endsWith('.xlsx')) { alert('Само .xlsx файлове!'); return; }
+  if (!/\.(xlsx|csv)$/i.test(f.name)) { alert('Само .xlsx и .csv файлове!'); return; }
   selectedFile = f;
   showFileInfo(f);
 }
@@ -256,45 +258,59 @@ function doImport() {
   }, 1200);
 
   const fd = new FormData();
-  fd.append('file', selectedFile);
+  const inputEl = document.getElementById('file-inp');
+  const fileToSend = (inputEl && inputEl.files && inputEl.files[0]) ? inputEl.files[0] : selectedFile;
+  if (!fileToSend) {
+    btn.disabled=false; btn.textContent='Опитай отново';
+    showResult('✗ Грешка: <strong>Не е избран файл</strong>', false);
+    return;
+  }
+  fd.append('file', fileToSend, fileToSend.name || 'import.xlsx');
   fd.append('mode', mode);
   if (label) fd.append('label', label);
+  const csrf = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+  if (csrf) fd.append('_csrf', csrf);
 
-  const ctrl = new AbortController();
-  const tmout = setTimeout(() => ctrl.abort(), 180000);
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', '/products/import', true);
+  xhr.withCredentials = true;
+  xhr.timeout = 180000;
 
-  fetch('/products/import', {method:'POST', body:fd, signal:ctrl.signal})
-    .then(r => r.text())
-    .then(text => {
-      clearInterval(timer); clearTimeout(tmout);
-      fill.style.width = '100%';
-      let d;
-      try { d = JSON.parse(text); } catch(e) {
-        btn.disabled=false; btn.textContent='Опитай отново';
-        showResult('✗ Сървърът върна грешен отговор:<br><code style="font-size:11px">' + escH(text.substring(0,400)) + '</code>', false);
-        return;
-      }
-      if (d.success) {
-        let msg = '';
-        if (d.mode==='first')   msg = '✓ Успешно! Записани <strong>' + (d.count||0).toLocaleString() + '</strong> продукта в Firebase.';
-        if (d.mode==='merge')   msg = '✓ Добавени <strong>' + d.added + '</strong> нови. Пропуснати: ' + d.skipped + '. Общо: <strong>' + (d.total||0).toLocaleString() + '</strong>.';
-        if (d.mode==='replace') msg = '✓ Заменени с <strong>' + (d.count||0).toLocaleString() + '</strong> продукта.' + (d.archive_key ? '<br><small style="opacity:.7">Архив: ' + escH(d.archive_key) + '</small>' : '');
-        showResult(msg, true);
-        setTimeout(() => location.href='/products', 3000);
-      } else {
-        btn.disabled=false; btn.textContent='Опитай отново';
-        let err = '✗ Грешка: <strong>' + escH(d.error||'Неизвестна грешка') + '</strong>';
-        if (d.written !== undefined) err += '<br><small>Записани преди грешката: ' + d.written + '</small>';
-        showResult(err, false);
-      }
-    })
-    .catch(err => {
-      clearInterval(timer); clearTimeout(tmout);
+  xhr.onload = function(){
+    clearInterval(timer);
+    fill.style.width = '100%';
+    const text = xhr.responseText || '';
+    let d;
+    try { d = JSON.parse(text); } catch(e) {
       btn.disabled=false; btn.textContent='Опитай отново';
-      showResult(err.name==='AbortError'
-        ? '✗ Timeout (>3 мин). Провери: <a href="/products" style="color:var(--gold)">→ Продукти</a>'
-        : '✗ Мрежова грешка: ' + escH(err.message), false);
-    });
+      showResult('✗ Сървърът върна грешен отговор:<br><code style="font-size:11px">' + escH(text.substring(0,400)) + '</code>', false);
+      return;
+    }
+    if (d.success) {
+      let msg = '';
+      if (d.mode==='first')   msg = '✓ Успешно! Записани <strong>' + (d.count||0).toLocaleString() + '</strong> продукта в Firebase.';
+      if (d.mode==='merge')   msg = '✓ Добавени <strong>' + d.added + '</strong> нови. Пропуснати: ' + d.skipped + '. Общо: <strong>' + (d.total||0).toLocaleString() + '</strong>.';
+      if (d.mode==='replace') msg = '✓ Заменени с <strong>' + (d.count||0).toLocaleString() + '</strong> продукта.' + (d.archive_key ? '<br><small style="opacity:.7">Архив: ' + escH(d.archive_key) + '</small>' : '');
+      showResult(msg, true);
+      setTimeout(() => location.href='/products', 3000);
+    } else {
+      btn.disabled=false; btn.textContent='Опитай отново';
+      let err = '✗ Грешка: <strong>' + escH(d.error||'Неизвестна грешка') + '</strong>';
+      if (d.written !== undefined) err += '<br><small>Записани преди грешката: ' + d.written + '</small>';
+      showResult(err, false);
+    }
+  };
+  xhr.onerror = function(){
+    clearInterval(timer);
+    btn.disabled=false; btn.textContent='Опитай отново';
+    showResult('✗ Мрежова грешка при качване', false);
+  };
+  xhr.ontimeout = function(){
+    clearInterval(timer);
+    btn.disabled=false; btn.textContent='Опитай отново';
+    showResult('✗ Timeout (>3 мин). Провери: <a href="/products" style="color:var(--gold)">→ Продукти</a>', false);
+  };
+  xhr.send(fd);
 }
 
 function showResult(msg, ok) {
@@ -319,23 +335,37 @@ function rebuildCache(btn) {
     .finally(()=>{ btn.disabled=false; btn.textContent=orig; });
 }
 
-function exportArchive(key) {
-  // POST request — avoids all URL encoding issues with special chars in key
+function exportArchive(key, label) {
+  const csrf = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
   const form = document.createElement('form');
   form.method = 'POST';
   form.action = '/products/export-archive';
   form.style.display = 'none';
-  const inp = document.createElement('input');
-  inp.type = 'hidden'; inp.name = 'key'; inp.value = key;
-  form.appendChild(inp);
+
+  const keyInp = document.createElement('input');
+  keyInp.type = 'hidden'; keyInp.name = 'key'; keyInp.value = key;
+  form.appendChild(keyInp);
+
+  const labelInp = document.createElement('input');
+  labelInp.type = 'hidden'; labelInp.name = 'label'; labelInp.value = label || '';
+  form.appendChild(labelInp);
+
+  if (csrf) {
+    const csrfInp = document.createElement('input');
+    csrfInp.type = 'hidden'; csrfInp.name = '_csrf'; csrfInp.value = csrf;
+    form.appendChild(csrfInp);
+  }
+
   document.body.appendChild(form);
   form.submit();
-  setTimeout(() => document.body.removeChild(form), 2000);
+  setTimeout(() => { if (form.parentNode) form.parentNode.removeChild(form); }, 2000);
 }
 
 function restoreArchive(key, label) {
   if (!confirm('Зареди архив "' + label + '"?\n\nТекущите продукти ще бъдат архивирани преди зареждането.')) return;
   const fd = new FormData(); fd.append('key', key);
+  const csrf = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+  if (csrf) fd.append('_csrf', csrf);
   fetch('/products/restore',{method:'POST',body:fd}).then(r=>r.json())
     .then(d=>{ if(d.success){alert('✓ Зареден!');location.href='/products';}else alert('✗ '+(d.error||'Грешка')); })
     .catch(()=>alert('✗ Мрежова грешка'));

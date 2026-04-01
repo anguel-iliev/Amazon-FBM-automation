@@ -5,7 +5,8 @@
   </div>
 </div>
 
-<div style="max-width:640px">
+<?php $suppliers = $suppliers ?? []; $brands = $brands ?? []; ?>
+<div style="max-width:760px">
 <div class="card">
   <div class="card-title">Нов продукт</div>
   <div id="form-result" style="display:none;margin-bottom:16px;padding:12px 16px;border-radius:6px;font-size:13px;font-weight:600"></div>
@@ -21,11 +22,21 @@
     </div>
     <div class="form-group">
       <label class="form-label">Доставчик</label>
-      <input type="text" id="f-supplier" class="form-control" placeholder="Orbico">
+      <select id="f-supplier" class="form-control" onchange="loadBrandsForSupplier(this.value)">
+        <option value="">Избери доставчик</option>
+        <?php foreach ($suppliers as $supplier): ?>
+        <option value="<?= htmlspecialchars($supplier) ?>"><?= htmlspecialchars($supplier) ?></option>
+        <?php endforeach; ?>
+      </select>
     </div>
     <div class="form-group">
       <label class="form-label">Бранд</label>
-      <input type="text" id="f-brand" class="form-control" placeholder="Always">
+      <select id="f-brand" class="form-control">
+        <option value="">Избери бранд</option>
+        <?php foreach ($brands as $brand): ?>
+        <option value="<?= htmlspecialchars($brand) ?>"><?= htmlspecialchars($brand) ?></option>
+        <?php endforeach; ?>
+      </select>
     </div>
   </div>
 
@@ -58,35 +69,59 @@
 </div>
 
 <script>
+const ADD_PRODUCT_CSRF_TOKEN = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
 function saveProduct() {
   const ean = document.getElementById('f-ean').value.trim();
+  const supplier = document.getElementById('f-supplier').value.trim();
+  const brand = document.getElementById('f-brand').value.trim();
   if (!ean) { showMsg('EAN Amazon е задължителен', false); return; }
+  if (!supplier) { showMsg('Избери доставчик', false); return; }
+  if (!brand) { showMsg('Избери бранд', false); return; }
 
   const btn = document.getElementById('save-btn');
   btn.disabled = true; btn.textContent = 'Записване…';
 
   const fd = new FormData();
-  fd.append('ean',      ean);
-  fd.append('asin',     document.getElementById('f-asin').value.trim());
-  fd.append('supplier', document.getElementById('f-supplier').value.trim());
-  fd.append('brand',    document.getElementById('f-brand').value.trim());
-  fd.append('model',    document.getElementById('f-model').value.trim());
-  fd.append('price',    document.getElementById('f-price').value.trim());
-  fd.append('link',     document.getElementById('f-link').value.trim());
-  fd.append('notes',    document.getElementById('f-notes').value.trim());
+  fd.append('ean', ean);
+  fd.append('asin', document.getElementById('f-asin').value.trim());
+  fd.append('supplier', supplier);
+  fd.append('brand', brand);
+  fd.append('model', document.getElementById('f-model').value.trim());
+  fd.append('price', document.getElementById('f-price').value.trim());
+  fd.append('link', document.getElementById('f-link').value.trim());
+  fd.append('notes', document.getElementById('f-notes').value.trim());
 
-  fetch('/products/add', {method:'POST', body:fd})
+  fetch('/products/add', {method:'POST', headers:{'X-CSRF-Token': ADD_PRODUCT_CSRF_TOKEN}, body:fd})
     .then(r => r.json())
     .then(d => {
       if (d.success) {
         showMsg('✓ Продуктът е записан в Firebase!', true);
-        setTimeout(() => window.location.href = '/products', 1500);
+        setTimeout(() => window.location.href = '/products', 1200);
       } else {
         showMsg('✗ ' + (d.error||'Грешка'), false);
         btn.disabled = false; btn.textContent = 'Запази в Firebase';
       }
     })
     .catch(() => { showMsg('✗ Мрежова грешка', false); btn.disabled=false; btn.textContent='Запази в Firebase'; });
+}
+
+function loadBrandsForSupplier(supplier) {
+  const brandSel = document.getElementById('f-brand');
+  brandSel.innerHTML = '<option value="">Зареждане…</option>';
+  fetch('/products/brands?supplier=' + encodeURIComponent(supplier), {headers: {'X-CSRF-Token': ADD_PRODUCT_CSRF_TOKEN}})
+    .then(r => r.json())
+    .then(d => {
+      brandSel.innerHTML = '<option value="">Избери бранд</option>';
+      const brands = (d && d.ok && Array.isArray(d.brands) ? d.brands : []);
+      brands.forEach(brand => {
+        const o = document.createElement('option');
+        o.value = brand; o.textContent = brand;
+        brandSel.appendChild(o);
+      });
+    })
+    .catch(() => {
+      brandSel.innerHTML = '<option value="">Избери бранд</option>';
+    });
 }
 
 function showMsg(msg, ok) {

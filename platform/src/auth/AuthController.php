@@ -7,7 +7,7 @@ class AuthController {
     public function setupPage() {
         // If users already exist, send to login
         require_once SRC . '/lib/UserStore.php';
-        if (UserStore::count() > 0) {
+        if (UserStore::hasUsers()) {
             View::redirect('/');
             return;
         }
@@ -18,7 +18,7 @@ class AuthController {
         require_once SRC . '/lib/UserStore.php';
 
         // Double-check: block if admin already exists
-        if (UserStore::count() > 0) {
+        if (UserStore::hasUsers()) {
             View::redirect('/');
             return;
         }
@@ -76,7 +76,13 @@ class AuthController {
     // ── Login ────────────────────────────────────────────────
     public function loginPage() {
         if (Auth::isLoggedIn()) View::redirect('/dashboard');
-        View::render('auth/login', ['error' => null]);
+        $supplierCount = 0;
+        $suppliersFile = DATA_DIR . '/suppliers.json';
+        if (file_exists($suppliersFile)) {
+            $suppliers = json_decode(file_get_contents($suppliersFile), true) ?? [];
+            $supplierCount = count(array_filter($suppliers, fn($s) => $s['active'] ?? true));
+        }
+        View::render('auth/login', ['error' => null, 'supplierCount' => $supplierCount]);
     }
 
     public function loginAction() {
@@ -91,22 +97,38 @@ class AuthController {
         }
 
         require_once SRC . '/lib/UserStore.php';
+        $rateKey = strtolower($email) . '|' . Security::clientIp();
+        $limit = Security::enforceRateLimit('login', $rateKey, 5, 900);
+        if (!$limit['allowed']) {
+            $mins = ceil(($limit['retry_after'] ?? 60) / 60);
+            Logger::audit('login.blocked.rate_limit', ['email' => $email, 'ip' => Security::clientIp(), 'retry_after' => $limit['retry_after'] ?? 0]);
+            View::render('auth/login', ['error' => 'Твърде много опити за вход. Опитайте отново след около ' . $mins . ' мин.']);
+            return;
+        }
+
         $result = UserStore::authenticate($email, $password);
 
         if ($result['ok'] && Auth::login($email, $password)) {
+            Security::clearRateLimit('login', $rateKey);
             Logger::info("Login: {$email}");
+            Logger::audit('login.success', ['email' => $email, 'ip' => Security::clientIp(), 'role' => Auth::role()]);
             View::redirect('/dashboard');
         } else {
             usleep(500000);
             Logger::warn("Failed login: {$email}");
+            Logger::audit('login.failed', ['email' => $email, 'ip' => Security::clientIp()]);
             View::render('auth/login', ['error' => $result['error'] ?? 'Грешен имейл или парола.']);
         }
     }
 
     public function logout() {
-        Logger::info("Logout: " . Auth::user());
+        $email = Auth::user();
+        Logger::info("Logout: " . $email);
+        Logger::audit('logout', ['email' => $email, 'ip' => Security::clientIp()]);
         Auth::logout();
-        View::redirect('/');
+        Security::sendLogoutHeaders();
+        header('Location: /?logged_out=1', true, 302);
+        exit;
     }
 
     // ── Register (от покана) ─────────────────────────────────
@@ -276,12 +298,17 @@ class AuthController {
             return;
         }
 
+        $inviteLink = APP_URL . '/register/' . $result['token'];
+        Logger::info("Invite requested for {$email} by " . Auth::user());
         $sent = Mailer::sendInvite($email, $result['token']);
         if ($sent) {
-            Session::flash('success', "Покана изпратена до {$email}");
+            Session::flash('success', "Покана изпратена до {$email}. Ако не пристигне, използвай този линк: {$inviteLink}");
             Logger::info("Invite sent to {$email} by " . Auth::user());
+            Logger::audit('invite.sent', ['email' => $email, 'by' => Auth::user(), 'ip' => Security::clientIp(), 'invite_link' => $inviteLink]);
         } else {
-            Session::flash('error', 'Поканата е създадена, но имейлът не беше изпратен. Провери SMTP настройките.');
+            Session::flash('error', "Поканата е създадена, но имейлът не беше изпратен. Използвай този линк ръчно: {$inviteLink}");
+            Logger::warn("Invite email failed for {$email}; manual link generated");
+            Logger::audit('invite.email_failed', ['email' => $email, 'by' => Auth::user(), 'ip' => Security::clientIp(), 'invite_link' => $inviteLink]);
         }
 
         View::redirect('/invite');
@@ -303,6 +330,7 @@ class AuthController {
         if (UserStore::deleteByEmail($email)) {
             Session::flash('success', "Потребителят {$email} е изтрит.");
             Logger::info("User deleted: {$email} by " . Auth::user());
+            Logger::audit('invite.user_deleted', ['email' => $email, 'by' => Auth::user(), 'ip' => Security::clientIp()]);
         } else {
             Session::flash('error', "Потребителят не е намерен.");
         }
@@ -338,12 +366,17 @@ class AuthController {
             return;
         }
 
+        $inviteLink = APP_URL . '/register/' . $token;
+        Logger::info("Invite resend requested for {$email} by " . Auth::user());
         $sent = Mailer::sendInvite($email, $token);
         if ($sent) {
-            Session::flash('success', "Поканата е изпратена повторно до {$email}");
+            Session::flash('success', "Поканата е изпратена повторно до {$email}. Резервен линк: {$inviteLink}");
             Logger::info("Invite resent to {$email} by " . Auth::user());
+            Logger::audit('invite.resent', ['email' => $email, 'by' => Auth::user(), 'ip' => Security::clientIp(), 'invite_link' => $inviteLink]);
         } else {
-            Session::flash('error', 'Имейлът не беше изпратен. Провери SMTP настройките.');
+            Session::flash('error', "Имейлът не беше изпратен. Използвай този линк ръчно: {$inviteLink}");
+            Logger::warn("Resend invite email failed for {$email}; manual link generated");
+            Logger::audit('invite.resend_email_failed', ['email' => $email, 'by' => Auth::user(), 'ip' => Security::clientIp(), 'invite_link' => $inviteLink]);
         }
 
         View::redirect('/invite');

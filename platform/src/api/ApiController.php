@@ -32,6 +32,7 @@ class ApiController {
             View::json(['success' => false, 'error' => 'Грешна текуща парола'], 403); return;
         }
         UserStore::setPassword(Auth::user(), $newPw);
+        Logger::audit('password.changed', ['email' => Auth::user(), 'ip' => Security::clientIp()]);
         View::json(['success' => true]);
     }
 

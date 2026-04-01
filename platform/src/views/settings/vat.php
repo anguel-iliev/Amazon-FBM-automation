@@ -10,6 +10,7 @@ $names = ['DE'=>'Germany','FR'=>'France','IT'=>'Italy','ES'=>'Spain','NL'=>'Neth
 ?>
 
 <form method="POST" action="/settings/save">
+  <?= View::csrfField() ?>
   <input type="hidden" name="_section" value="vat">
 
   <!-- Marketplace table -->

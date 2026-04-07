@@ -20,7 +20,7 @@ define('APP_NAME',    'AMZ Retail');
 define('APP_URL',     env('APP_URL', 'https://amz-retail.tnsoft.eu'));
 define('APP_DEBUG',   env('APP_DEBUG', 'false') === 'true');
 define('TIMEZONE',    'Europe/Sofia');
-define('VERSION',     '4.3.6');
+define('VERSION',     '4.5.6');
 
 date_default_timezone_set(TIMEZONE);
 
@@ -76,6 +76,7 @@ spl_autoload_register(function (string $class) {
         'PricingController'   => SRC . '/modules/pricing/PricingController.php',
         'SettingsController'  => SRC . '/modules/settings/SettingsController.php',
         'SuppliersController' => SRC . '/modules/suppliers/SuppliersController.php',
+        'CouriersController'  => SRC . '/modules/couriers/CouriersController.php',
         'ApiController'       => SRC . '/api/ApiController.php',
     ];
     if (isset($map[$class])) require_once $map[$class];

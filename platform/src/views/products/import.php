@@ -39,6 +39,18 @@
         </div>
         <button onclick="resetFile()" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px;padding:4px 8px">✕ Смени</button>
       </div>
+      <div id="validate-box" style="display:none;background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:6px;padding:12px 16px;margin-bottom:16px">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+          <div style="font-size:13px;font-weight:700;color:var(--text)">Проверка на файла преди импорт</div>
+          <button type="button" class="btn btn-ghost btn-sm" id="validate-btn" onclick="validateFile()">Провери файла</button>
+        </div>
+        <div id="validate-status" style="font-size:12px;color:var(--muted);margin-top:8px">Натисни „Провери файла“, за да видиш статистика по EAN Amazon.</div>
+        <div id="validate-stats" style="display:none;margin-top:10px;font-size:13px;line-height:1.8">
+          <div>Уникални EAN Amazon: <strong id="stat-unique">0</strong></div>
+          <div>Празни EAN Amazon: <strong id="stat-blank">0</strong></div>
+          <div>Дубликати по EAN Amazon: <strong id="stat-dup">0</strong></div>
+        </div>
+      </div>
 
       <!-- 3 modes -->
       <div class="form-group">
@@ -186,6 +198,7 @@
 
 <script>
 let selectedFile = null;
+let validationReady = false;
 
 // Drag & drop on whole page
 document.addEventListener('dragover',  e => e.preventDefault());
@@ -207,20 +220,26 @@ function onFileChosen(inp) {
 }
 
 function showFileInfo(f) {
+  validationReady = false;
   document.getElementById('chosen-name').textContent = '📄 ' + f.name;
   document.getElementById('chosen-size').textContent = (f.size/1024).toFixed(1) + ' KB';
   document.getElementById('step-choose').style.display = 'none';
   document.getElementById('step-import').style.display = 'block';
   document.getElementById('result').style.display = 'none';
+  document.getElementById('validate-box').style.display = 'block';
+  document.getElementById('validate-stats').style.display = 'none';
+  document.getElementById('validate-status').textContent = 'Натисни „Провери файла“, за да видиш статистика по EAN Amazon.';
 }
 
 function resetFile() {
   selectedFile = null;
+  validationReady = false;
   document.getElementById('file-inp').value = '';
   document.getElementById('step-choose').style.display = 'block';
   document.getElementById('step-import').style.display = 'none';
   document.getElementById('result').style.display = 'none';
   document.getElementById('progress').style.display = 'none';
+  const vb = document.getElementById('validate-box'); if (vb) vb.style.display='none';
 }
 
 function updateMode(radio) {
@@ -235,8 +254,45 @@ function updateMode(radio) {
   document.getElementById('import-btn').textContent = labels[v] + ' →';
 }
 
+function validateFile() {
+  if (!selectedFile) { document.getElementById('file-inp').click(); return; }
+  const btn = document.getElementById('validate-btn');
+  const status = document.getElementById('validate-status');
+  btn.disabled = true; btn.textContent = 'Проверка…';
+  status.textContent = 'Анализ на файла…';
+  const fd = new FormData();
+  const inputEl = document.getElementById('file-inp');
+  const fileToSend = (inputEl && inputEl.files && inputEl.files[0]) ? inputEl.files[0] : selectedFile;
+  fd.append('file', fileToSend, fileToSend.name || 'import.xlsx');
+  const csrf = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+  if (csrf) fd.append('_csrf', csrf);
+  fetch('/products/validate-import', {method:'POST', body:fd, credentials:'same-origin'})
+    .then(async r=>{
+      const txt = await r.text();
+      try { return JSON.parse(txt); } catch(e) {
+        throw new Error(txt && txt.trim().startsWith('<') ? 'Сървърът върна HTML вместо JSON. Провери дали маршрутът /products/validate-import е активен.' : (txt || 'Невалиден отговор от сървъра'));
+      }
+    })
+    .then(d=>{
+      if (!d.success) throw new Error(d.error || 'Грешка при проверката');
+      document.getElementById('stat-unique').textContent = Number(d.unique_ean||0).toLocaleString();
+      document.getElementById('stat-blank').textContent = Number(d.blank_ean||0).toLocaleString();
+      document.getElementById('stat-dup').textContent = Number(d.duplicate_ean||0).toLocaleString();
+      document.getElementById('validate-stats').style.display = 'block';
+      status.textContent = 'Файлът е анализиран. Прегледай статистиката и след това натисни „Импортирай“.';
+      validationReady = true;
+    })
+    .catch(e=>{
+      validationReady = false;
+      document.getElementById('validate-stats').style.display = 'none';
+      status.textContent = '✗ ' + (e.message || 'Грешка при проверката');
+    })
+    .finally(()=>{ btn.disabled=false; btn.textContent='Провери файла'; });
+}
+
 function doImport() {
   if (!selectedFile) { document.getElementById('file-inp').click(); return; }
+  if (!validationReady) { validateFile(); return; }
   const mode  = document.querySelector('input[name="mode"]:checked').value;
   const label = document.getElementById('archive-label')?.value?.trim() || '';
   const btn   = document.getElementById('import-btn');

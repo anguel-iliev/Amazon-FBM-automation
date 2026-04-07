@@ -98,6 +98,7 @@ $router->add('GET',  '/products/add',            'ProductsController',  'addPage
 $router->add('POST', '/products/add',            'ProductsController',  'addAction');
 $router->add('GET',  '/products/import',         'ProductsController',  'importPage');
 $router->add('POST', '/products/import',         'ProductsController',  'importAction');
+$router->add('POST', '/products/validate-import', 'ProductsController',  'validateImportAction');
 $router->add('POST', '/products/restore',        'ProductsController',  'restoreArchive');
 $router->add('GET',  '/products/export-archive', 'ProductsController',  'exportArchive');
 $router->add('POST', '/products/export-archive', 'ProductsController',  'exportArchive');
@@ -114,6 +115,19 @@ $router->add('GET',  '/pricing',                 'PricingController',   'redirec
 $router->add('GET',  '/vat',                     'PricingController',   'index');
 $router->add('POST', '/pricing/calculate',       'PricingController',   'calculate');
 $router->add('GET',  '/suppliers',               'SuppliersController', 'index');
+
+$router->add('GET',  '/couriers',                'CouriersController',  'index');
+$router->add('POST', '/couriers/save',           'CouriersController',  'save');
+$router->add('GET',  '/couriers/template',       'CouriersController',  'template');
+$router->add('GET',  '/couriers/export',         'CouriersController',  'export');
+$router->add('GET',  '/couriers/download-import', 'CouriersController',  'downloadImport');
+$router->add('POST', '/couriers/delete-import',   'CouriersController',  'deleteImport');
+$router->add('POST', '/couriers/import',         'CouriersController',  'import');
+$router->add('GET',  '/couriers/import',         'CouriersController',  'index');
+$router->add('POST', '/couriers/activate',       'CouriersController',  'activate');
+$router->add('POST', '/couriers/save-mode',      'CouriersController',  'saveMode');
+$router->add('GET',  '/couriers/save-mode',      'CouriersController',  'index');
+$router->add('POST', '/couriers/delete-rates',   'CouriersController',  'deleteRates');
 $router->add('POST', '/suppliers/save',          'SuppliersController', 'save');
 $router->add('POST', '/suppliers/delete',        'SuppliersController', 'delete');
 $router->add('GET',  '/settings',                'SettingsController',  'index');

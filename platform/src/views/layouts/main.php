@@ -44,6 +44,12 @@
           <span>Доставчици</span>
         </a>
       </li>
+      <li class="nav-item <?= ($activePage ?? '') === 'couriers' ? 'active' : '' ?>">
+        <a href="/couriers" class="nav-link">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="none"><path d="M3 6h10l2 3h2v4h-2a2 2 0 1 1-4 0H9a2 2 0 1 1-4 0H3V6Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><circle cx="7" cy="13" r="1.8" stroke="currentColor" stroke-width="1.6"/><circle cx="13" cy="13" r="1.8" stroke="currentColor" stroke-width="1.6"/></svg>
+          <span>Куриери</span>
+        </a>
+      </li>
       <?php endif; ?>
       <li class="nav-item <?= ($activePage ?? '') === 'pricing' ? 'active' : '' ?>">
         <a href="/vat" class="nav-link">

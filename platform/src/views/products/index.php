@@ -12,6 +12,9 @@ $filters     = $filters     ?? [];
 $perPage     = $perPage     ?? 50;
 $page        = $page        ?? 1;
 $columnsMeta = $columnsMeta ?? ProductDB::getAllColumnsMeta();
+$marketplaces = $marketplaces ?? ProductDB::getMarketplaces();
+$currentMarketplace = $currentMarketplace ?? ProductDB::getDefaultMarketplaceCode();
+$activeCourier = $activeCourier ?? ProductDB::getActiveCourier();
 
 $coreWidths = [
   'EAN Amazon'=>130,'EAN Доставчик'=>130,'Наше SKU'=>120,'Доставчик SKU'=>120,'Доставчик'=>100,'Бранд'=>90,'Модел'=>240,
@@ -166,6 +169,7 @@ td.ed:hover{background:rgba(201,168,76,.05)!important}td.ed:hover::after{backgro
 .loading-row td,.error-row td,.empty-row td{padding:40px!important}
 .loading-row td{text-align:center;color:rgba(255,255,255,.5)!important}
 .error-row td{text-align:center;color:#F08080!important}
+.warn-rate{background:rgba(255,179,71,.06)!important;border-left:2px solid rgba(255,179,71,.55)!important}
 .empty-row td{text-align:center;color:rgba(255,255,255,.4)!important}
 
 /* ── Toast ── */
@@ -242,6 +246,15 @@ td.ed:hover{background:rgba(201,168,76,.05)!important}td.ed:hover::after{backgro
       <option value="UPLOADED" <?= ($filters['upload_status'] ?? '') === 'UPLOADED' ? 'selected' : '' ?>>Качени</option>
     </select>
   </div>
+  <div class="pfg pfb"><label>Маркетплейс</label>
+    <select id="f-market" onchange="changeMarketplace(this.value)">
+      <?php foreach (($marketplaces ?? []) as $mk): ?>
+        <option value="<?= htmlspecialchars($mk['code']) ?>" <?= (($currentMarketplace ?? 'DE') === $mk['code']) ? 'selected' : '' ?>>
+          <?= htmlspecialchars($mk['code']) ?> — <?= htmlspecialchars($mk['name']) ?>
+        </option>
+      <?php endforeach; ?>
+    </select>
+  </div>
   <div class="pfg pfs"><label>Търсене</label>
     <input type="text" id="f-search" placeholder="Модел, EAN, ASIN, SKU…" value="<?= htmlspecialchars($filters['search'] ?? '') ?>" style="width:100%" onkeydown="if(event.key==='Enter')applyFilters()">
   </div>
@@ -254,7 +267,7 @@ td.ed:hover{background:rgba(201,168,76,.05)!important}td.ed:hover::after{backgro
 
 <!-- Action row -->
 <div class="par">
-  <div class="par-info" id="par-info">Зареждане…</div>
+  <div class="par-info" id="par-info">Зареждане…</div><div style="font-size:12px;color:rgba(255,255,255,.55);margin-left:8px">Куриер: <?= htmlspecialchars(($activeCourier['name'] ?? 'няма активен')) ?> · Marketplace: <?= htmlspecialchars($currentMarketplace ?? 'DE') ?></div>
   <div class="par-actions">
     <a href="/products/add" class="btn btn-ghost btn-sm btn-wrap2">+ Добави<br>продукт</a>
     <button type="button" id="delete-btn" class="btn btn-danger btn-sm" onclick="deleteSelected()" disabled>Изтрий</button>
@@ -508,7 +521,7 @@ function loadProducts() {
   buildHeader();
 
   const params = new URLSearchParams();
-  ['dostavchik','brand','upload_status','search','sort','dir','page','perpage'].forEach(k => { const v = STATE[k]; if(v!=='' && v!==null && v!==undefined) params.set(k, v); });
+  ['dostavchik','brand','upload_status','search','mp','sort','dir','page','perpage'].forEach(k => { const v = STATE[k]; if(v!=='' && v!==null && v!==undefined) params.set(k, v); });
 
   updateExportButtons();
 
@@ -590,7 +603,12 @@ function renderTable(products, meta) {
         html += `<td class="cr ${resC}">${res !== 0 ? fmtNum(res) : ''}</td>`;
       } else if (type === 'num') {
         const n = raw !== '' ? parseFloat(raw) : null;
-        html += `<td class="cn${editable?' ed':''}"${attr}>${n !== null && !isNaN(n) ? fmtNum(n) : (valH||'')}</td>`;
+        if (key === 'Транспорт до кр. лиент  Netto' && p['_courier_rate_missing']) {
+          const reason = escH(p['_courier_rate_reason'] || 'Няма намерена тарифа');
+          html += `<td class="cn warn-rate" title="${reason}"><span style="display:inline-flex;align-items:center;gap:6px;color:#ffb347;font-weight:700">⚠ <span style="font-size:12px">Няма тарифа</span></span></td>`;
+        } else {
+          html += `<td class="cn${editable?' ed':''}"${attr}>${n !== null && !isNaN(n) ? fmtNum(n) : (valH||'')}</td>`;
+        }
       } else {
         const textClass = CENTER_COLS.includes(key) ? 'cc' : 'ct';
         html += `<td class="${textClass}${editable?' ed':''}"${attr} title="${valH}">${valH}</td>`;
@@ -729,6 +747,8 @@ function goPage(p)          { STATE.page=p; loadProducts(); }
 function sortBy(col)        { STATE.dir=(STATE.sort===col&&STATE.dir==='asc')?'desc':'asc'; STATE.sort=col; STATE.page=1; loadProducts(); }
 function changePerPage(val) { STATE.perpage=parseInt(val); STATE.page=1; loadProducts(); }
 
+function changeMarketplace(val){ STATE.mp = val || 'DE'; STATE.page = 1; updateExportButtons(); loadProducts(); }
+
 function applyFilters() {
   STATE.dostavchik    = document.getElementById('f-dost').value;
   STATE.brand         = document.getElementById('f-brand').value;
@@ -742,6 +762,7 @@ function clearFilters() {
   STATE.sort = ''; STATE.dir = 'asc'; STATE.page = 1;
   ['f-dost','f-brand','f-status'].forEach(id => document.getElementById(id).value = '');
   document.getElementById('f-search').value = '';
+  const fm = document.getElementById('f-market'); if (fm) STATE.mp = fm.value || STATE.mp;
   loadProducts();
 }
 function updateBrands(supplier) {

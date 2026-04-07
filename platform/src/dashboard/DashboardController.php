@@ -2,8 +2,8 @@
 class DashboardController {
     public function index(): void {
         try {
-            $stats  = ProductDB::stats();     // reads local cache — instant
-            $logs   = Firebase::getLogs(6);      // small log data — ok
+            $stats  = ProductDB::stats();
+            $logs   = Firebase::getLogs(6);
             $recent = ProductDB::query([], '', 'asc', 1, 10)['products'];
         } catch (\Throwable $e) {
             Logger::error("Dashboard Firebase: " . $e->getMessage());
@@ -12,13 +12,7 @@ class DashboardController {
             $recent = [];
         }
         $lastLog = $logs[0] ?? null;
-
-        // Override supplier count with local file (authoritative 17)
-        $suppFile = DATA_DIR . '/suppliers.json';
-        if (file_exists($suppFile)) {
-            $sl = json_decode(file_get_contents($suppFile), true) ?? [];
-            $stats['suppliers'] = count(array_filter($sl, fn($s) => $s['active'] ?? true));
-        }
+        $stats['suppliers'] = ProductDB::realSupplierCount();
 
         View::renderWithLayout('dashboard/index', [
             'pageTitle'  => 'Dashboard',

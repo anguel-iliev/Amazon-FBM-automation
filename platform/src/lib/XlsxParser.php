@@ -7,6 +7,14 @@
 class XlsxParser {
 
     /**
+     * Compatibility helper for modules that expect plain row arrays.
+     */
+    public static function toRows(string $filePath): array {
+        $parsed = static::parse($filePath);
+        return $parsed['products'] ?? [];
+    }
+
+    /**
      * Парсва .xlsx файл.
      * Връща ['products' => [...], 'columns' => [...], 'errors' => [...]]
      */

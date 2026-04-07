@@ -23,6 +23,10 @@ class SettingsController {
         }
         unset($col);
         $columns = array_values(array_filter($columns, static function(array $col): bool {
+            $name = trim((string)($col['name'] ?? ''));
+            if (in_array($name, ['Транспорт до кр. лиент  Netto','Транспорт до кр. лиент Netto'], true)) {
+                return false; // system-managed by courier engine
+            }
             return (($col['data_type'] ?? 'text') === 'number') || !empty($col['is_formula']);
         }));
         $this->render('prices', 'Настройки — Формули', 'settings-prices', [

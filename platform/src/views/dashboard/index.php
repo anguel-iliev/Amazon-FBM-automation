@@ -7,13 +7,7 @@ $avgRez   = $s['avgRez'] ?? 0;
 $posRez   = $s['posRez'] ?? 0;
 $negRez   = $s['negRez'] ?? 0;
 
-// Supplier count from local suppliers.json (authoritative — 17)
-$suppliersFile = DATA_DIR . '/suppliers.json';
-$supplierCount = 17;
-if (file_exists($suppliersFile)) {
-    $sl = json_decode(file_get_contents($suppliersFile), true) ?? [];
-    $supplierCount = count(array_filter($sl, fn($s) => $s['active'] ?? true));
-}
+$supplierCount = $s['suppliers'] ?? 0;
 ?>
 
 <div class="stats-grid">

@@ -39,6 +39,9 @@ class ProductsController {
             'perPage'    => $perPage,
             'page'       => $page,
             'columnsMeta'=> ProductDB::getAllColumnsMeta(),
+            'marketplaces'=> ProductDB::getMarketplaces(),
+            'currentMarketplace'=> ProductDB::getMarketplaceCodeFromRequest(),
+            'activeCourier'=> ProductDB::getActiveCourier(),
         ]);
     }
 
@@ -120,6 +123,9 @@ class ProductsController {
             'suppliers'=>$suppliers,
             'brands'=>$brands,
             'columnsMeta'=> ProductDB::getAllColumnsMeta(),
+            'marketplaces'=> ProductDB::getMarketplaces(),
+            'currentMarketplace'=> ProductDB::getMarketplaceCodeFromRequest(),
+            'activeCourier'=> ProductDB::getActiveCourier(),
         ]);
     }
 
@@ -156,11 +162,17 @@ class ProductsController {
         try {
             $scope = trim((string)($_POST['scope'] ?? 'selected'));
             if ($scope === 'all') {
+                $existing = Firebase::getProducts();
+                $existingCount = is_array($existing) ? count($existing) : 0;
+                $archiveKey = '';
+                if ($existingCount > 0) {
+                    $archiveKey = ProductDB::saveArchiveSnapshot($existing, 'Авто архив преди изтриване ' . date('d.m.Y H:i'));
+                }
                 $fb = Firebase::deleteAllProducts();
                 if (!$fb['ok']) { echo json_encode(['success'=>false,'error'=>$fb['error'] ?? 'Firebase грешка']); return; }
                 $count = ProductDB::deleteAll();
-                Logger::audit('products.deleted_all', ['count'=>$count, 'by'=>Auth::user()['email'] ?? '']);
-                echo json_encode(['success'=>true,'deleted'=>$count]);
+                Logger::audit('products.deleted_all', ['count'=>$count, 'by'=>Auth::user()['email'] ?? '', 'archive_key'=>$archiveKey]);
+                echo json_encode(['success'=>true,'deleted'=>$count,'archive_key'=>$archiveKey]);
                 return;
             }
             $eans = $_POST['eans'] ?? [];
@@ -179,7 +191,7 @@ class ProductsController {
 
     // ── Import page ───────────────────────────────────────────
     public function importPage(): void {
-        try { $archives = Firebase::listArchives(); } catch (\Throwable $e) { $archives = []; }
+        try { $archives = ProductDB::listProductArchives(); } catch (\Throwable $e) { $archives = []; }
         $cacheStatus = ProductDB::status();
         View::renderWithLayout('products/import', [
             'pageTitle'   => 'Import продукти',
@@ -246,7 +258,7 @@ class ProductsController {
                     'message'=>"Импортирани {$result['written']} продукта."]);
 
             } elseif ($mode === 'replace') {
-                $archiveKey = Firebase::archiveCurrent($label ?: 'Преди импорт '.date('d.m.Y H:i'));
+                $archiveKey = ProductDB::saveArchiveSnapshot(Firebase::getProducts(), $label ?: 'Преди импорт '.date('d.m.Y H:i'));
                 $result     = Firebase::putProducts($parsed['products']);
                 if (!$result['ok']) { echo json_encode(['success'=>false,'error'=>$result['error'],'written'=>$result['written']]); return; }
                 // Write to SQLite
@@ -272,18 +284,62 @@ class ProductsController {
         }
     }
 
+
+    public function validateImportAction(): void {
+        header('Content-Type: application/json; charset=utf-8');
+        try {
+            $upload = $_FILES['file'] ?? ($_FILES[array_key_first($_FILES ?? [])] ?? null);
+            if (!$upload || !is_array($upload)) { echo json_encode(['success'=>false,'error'=>'Не е избран файл']); return; }
+            $uploadError = (int)($upload['error'] ?? UPLOAD_ERR_OK);
+            if ($uploadError !== UPLOAD_ERR_OK) { echo json_encode(['success'=>false,'error'=>'Невалиден файл']); return; }
+            if (empty($upload['tmp_name']) || !is_uploaded_file($upload['tmp_name'])) { echo json_encode(['success'=>false,'error'=>'Не е избран файл']); return; }
+            $ext = strtolower((string)pathinfo($upload['name'] ?? '', PATHINFO_EXTENSION));
+            if (!in_array($ext, ['xlsx','csv'], true)) { echo json_encode(['success'=>false,'error'=>'Само .xlsx и .csv файлове']); return; }
+
+            $tmpPath = DATA_DIR . '/validate_' . time() . '_' . bin2hex(random_bytes(3)) . '.' . $ext;
+            if (!move_uploaded_file($upload['tmp_name'], $tmpPath) && !@copy($upload['tmp_name'], $tmpPath)) {
+                echo json_encode(['success'=>false,'error'=>'Грешка при качване']); return;
+            }
+            $parsed = XlsxParser::parse($tmpPath);
+            @unlink($tmpPath);
+
+            $rows = $parsed['products'] ?? [];
+            if (!$rows) { echo json_encode(['success'=>false,'error'=>'Файлът е празен']); return; }
+
+            $blank = 0
+            ;$seen = [];
+            $dups = 0;
+            foreach ($rows as $r) {
+                $ean = trim((string)($r['EAN Amazon'] ?? ''));
+                if ($ean === '') { $blank++; continue; }
+                if (isset($seen[$ean])) $dups++;
+                else $seen[$ean] = 1;
+            }
+            echo json_encode([
+                'success'=>true,
+                'rows'=>count($rows),
+                'unique_ean'=>count($seen),
+                'blank_ean'=>$blank,
+                'duplicate_ean'=>$dups,
+            ]);
+        } catch (\Throwable $e) {
+            echo json_encode(['success'=>false,'error'=>'PHP: '.$e->getMessage()]);
+        }
+    }
+
     // ── Restore archive ───────────────────────────────────────
     public function restoreArchive(): void {
         header('Content-Type: application/json; charset=utf-8');
         try {
             $key = trim($_POST['key'] ?? $_GET['key'] ?? '');
             if (!$key) { echo json_encode(['success'=>false,'error'=>'Невалиден архив']); return; }
-            Firebase::archiveCurrent('Преди възстановяване '.date('d.m.Y H:i'));
-            $ok = Firebase::restoreArchive($key);
-            if ($ok) {
-                ProductDB::rebuildFromFirebase();
-            }
-            echo json_encode(['success'=>$ok,'message'=>$ok?'Архивът е зареден!':'Firebase грешка']);
+            ProductDB::saveArchiveSnapshot(Firebase::getProducts(), 'Преди възстановяване '.date('d.m.Y H:i'));
+            $restored = ProductDB::restoreProductArchive($key);
+            if (empty($restored['ok'])) { echo json_encode(['success'=>false,'error'=>$restored['error'] ?? 'Невалиден архив']); return; }
+            $put = Firebase::putProducts($restored['products']);
+            $ok = !empty($put['ok']);
+            if ($ok) ProductDB::replaceAll($restored['products']);
+            echo json_encode(['success'=>$ok,'message'=>$ok?'Архивът е зареден!':($put['error'] ?? 'Firebase грешка')]);
         } catch (\Throwable $e) {
             echo json_encode(['success'=>false,'error'=>$e->getMessage()]);
         }
@@ -303,11 +359,7 @@ class ProductsController {
 
     private function getSupplierTransportMap(): array {
         $map = [];
-        $file = DATA_DIR . '/suppliers.json';
-        if (!file_exists($file)) return $map;
-        $rows = json_decode((string)file_get_contents($file), true);
-        if (!is_array($rows)) return $map;
-        foreach ($rows as $row) {
+        foreach (ProductDB::getSuppliers(true) as $row) {
             $name = trim((string)($row['name'] ?? ''));
             if ($name === '') continue;
             $val = trim((string)($row['transport_to_us'] ?? '0.39'));
@@ -629,10 +681,7 @@ class ProductsController {
     }
 
     private function loadSupplierNames(): array {
-        $file = DATA_DIR . '/suppliers.json';
-        if (!file_exists($file)) return [];
-        $list = json_decode(file_get_contents($file), true) ?? [];
-        $names = array_map(fn($s) => $s['name'], array_filter($list, fn($s) => $s['active'] ?? true));
+        $names = array_map(fn($s) => $s['name'], ProductDB::getSuppliers(true));
         $names = array_values(array_unique(array_filter(array_map('trim', $names))));
         natcasesort($names);
         return array_values($names);
@@ -645,39 +694,15 @@ class ProductsController {
             http_response_code(400); echo 'Невалиден архивен ключ'; exit;
         }
 
-        // Try key as-is
-        $res = Firebase::get("/archive/{$key}");
-
-        // Fallback 1: URL-decode (for old keys sent via GET)
-        if (!$res['ok'] || empty($res['data']['products'])) {
-            $decoded = urldecode($key);
-            if ($decoded !== $key) {
-                $res = Firebase::get("/archive/{$decoded}");
-            }
-        }
-
-        // Fallback 2: Search all archives and match by date prefix
-        if (!$res['ok'] || empty($res['data']['products'])) {
-            $allArchives = Firebase::get('/archive');
-            if ($allArchives['ok'] && is_array($allArchives['data'])) {
-                $datePrefix = substr($key, 0, 16); // "2026-03-25_17-07"
-                foreach ($allArchives['data'] as $archKey => $archVal) {
-                    if (str_starts_with((string)$archKey, $datePrefix)) {
-                        $res = ['ok' => true, 'data' => $archVal];
-                        break;
-                    }
-                }
-            }
-        }
-
-        if (!$res['ok'] || empty($res['data']['products'])) {
+        $archive = ProductDB::getProductArchive($key);
+        if (!$archive || empty($archive['products'])) {
             http_response_code(404);
             echo 'Архивът не е намерен. Ако проблемът продължава, направи нов импорт "Замени изцяло" за да създадеш нов архив.';
             exit;
         }
 
-        $products = array_values($res['data']['products']);
-        $archDate = $res['data']['date'] ?? '';
+        $products = array_values($archive['products']);
+        $archDate = $archive['date'] ?? '';
         // Build short clean filename: archive_2026-03-25_17-07.xlsx
         // Extract just the date+time prefix from the key (first 16 chars: "2026-03-25_17-07")
         $datePrefix = substr($key, 0, 16);
@@ -700,7 +725,7 @@ class ProductsController {
             'DM цена','Нова цена след намаление','Доставени','За следваща поръчка','Електоника',
         ];
 
-        $sheetName = trim((string)($res['data']['label'] ?? ($_POST['label'] ?? $_GET['label'] ?? '')));
+        $sheetName = trim((string)($archive['label'] ?? ($_POST['label'] ?? $_GET['label'] ?? '')));
         if ($sheetName === '') {
             $sheetName = 'Archive';
         }

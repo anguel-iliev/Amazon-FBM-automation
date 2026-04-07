@@ -31,6 +31,11 @@ class ProductDB {
         }
 
         static::migrateLegacyFormulas();
+        static::migrateSuppliers();
+        static::seedMarketplaces();
+        static::ensureWeightColumn();
+        static::ensureShippingModeColumn();
+        static::ensureCourierState();
         return static::$pdo;
     }
 
@@ -125,6 +130,84 @@ class ProductDB {
                 changed_by TEXT DEFAULT '',
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
+
+            CREATE TABLE IF NOT EXISTS suppliers (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE,
+                email TEXT DEFAULT '',
+                phone TEXT DEFAULT '',
+                website TEXT DEFAULT '',
+                notes TEXT DEFAULT '',
+                active INTEGER NOT NULL DEFAULT 1,
+                currency TEXT NOT NULL DEFAULT 'EUR',
+                payment_terms TEXT DEFAULT '',
+                min_order REAL NOT NULL DEFAULT 0,
+                transport_to_us TEXT NOT NULL DEFAULT '0.39',
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS idx_suppliers_active ON suppliers(active);
+            CREATE INDEX IF NOT EXISTS idx_suppliers_name ON suppliers(name COLLATE NOCASE);
+
+            CREATE TABLE IF NOT EXISTS product_archives (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                archive_key TEXT NOT NULL UNIQUE,
+                label TEXT NOT NULL DEFAULT '',
+                count INTEGER NOT NULL DEFAULT 0,
+                products_json TEXT NOT NULL DEFAULT '[]',
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS idx_product_archives_created ON product_archives(created_at DESC);
+
+            CREATE TABLE IF NOT EXISTS couriers (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE,
+                active INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS idx_couriers_name ON couriers(name COLLATE NOCASE);
+
+            CREATE TABLE IF NOT EXISTS courier_rate_rows (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                courier_id TEXT NOT NULL,
+                weight_from REAL NOT NULL DEFAULT 0,
+                weight_to REAL NOT NULL DEFAULT 0,
+                netto REAL NOT NULL DEFAULT 0,
+                brutto REAL NOT NULL DEFAULT 0,
+                countries_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(courier_id) REFERENCES couriers(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_courier_rate_rows_courier ON courier_rate_rows(courier_id);
+
+            CREATE TABLE IF NOT EXISTS courier_rate_imports (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                courier_id TEXT NOT NULL,
+                original_filename TEXT NOT NULL DEFAULT '',
+                mime_type TEXT NOT NULL DEFAULT 'application/octet-stream',
+                file_blob BLOB NOT NULL,
+                row_count INTEGER NOT NULL DEFAULT 0,
+                imported_by TEXT DEFAULT '',
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(courier_id) REFERENCES couriers(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_courier_rate_imports_courier ON courier_rate_imports(courier_id, created_at DESC);
+
+            CREATE TABLE IF NOT EXISTS marketplaces (
+                code TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                country_label TEXT NOT NULL,
+                currency TEXT NOT NULL DEFAULT 'EUR',
+                vat_rate REAL NOT NULL DEFAULT 0.20,
+                is_active INTEGER NOT NULL DEFAULT 1,
+                is_default INTEGER NOT NULL DEFAULT 0,
+                position INTEGER NOT NULL DEFAULT 999,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS idx_marketplaces_active ON marketplaces(is_active);
+            CREATE INDEX IF NOT EXISTS idx_marketplaces_position ON marketplaces(position);
         ");
     }
 
@@ -178,23 +261,20 @@ class ProductDB {
         return $name;
     }
 
-    private static function supplierTransportMap(): array {
-        static $map = null;
-        if ($map !== null) return $map;
-        $map = [];
-        $file = DATA_DIR . '/suppliers.json';
-        if (!file_exists($file)) return $map;
-        $rows = json_decode((string)file_get_contents($file), true);
-        if (!is_array($rows)) return $map;
-        foreach ($rows as $row) {
-            $name = static::normalizeSupplierName((string)($row['name'] ?? ''));
-            if ($name === '') continue;
-            $val = trim((string)($row['transport_to_us'] ?? ''));
-            if ($val === '') continue;
-            $map[$name] = number_format((float)str_replace(',', '.', $val), 2, '.', '');
-        }
-        return $map;
+    
+private static function supplierTransportMap(): array {
+    static $map = null;
+    if ($map !== null) return $map;
+    $map = [];
+    foreach (static::getSuppliers(true) as $row) {
+        $name = static::normalizeSupplierName((string)($row['name'] ?? ''));
+        if ($name === '') continue;
+        $val = trim((string)($row['transport_to_us'] ?? '0.39'));
+        if ($val === '' || !is_numeric(str_replace(',', '.', $val))) $val = '0.39';
+        $map[$name] = number_format((float)str_replace(',', '.', $val), 2, '.', '');
     }
+    return $map;
+}
 
     private static function rowToProduct(array $row): array {
         $rev = static::reverseMap();
@@ -215,6 +295,37 @@ class ProductDB {
         if ($supplier !== '' && isset($transportMap[$supplier])) {
             $p['Транспорт от Доставчик до нас'] = $transportMap[$supplier];
         }
+        $marketplaceCode = static::getMarketplaceCodeFromRequest();
+        $activeCourier = static::getActiveCourier();
+        $weight = static::productWeightKg($p);
+        $shippingMode = static::productShippingMode($p);
+
+        $p['_courier_rate_missing'] = '';
+        $p['_courier_rate_reason'] = '';
+
+        // system-managed column: never trust imported manual values here
+        $p['Транспорт до кр. лиент  Netto'] = '';
+        if (!static::hasFormula('ДДС  от Транспорт до кр. лиент')) {
+            $p['ДДС  от Транспорт до кр. лиент'] = '';
+        }
+
+        if (!$activeCourier) {
+            $p['_courier_rate_reason'] = 'Няма активен куриер';
+        } elseif ($weight === null) {
+            $p['_courier_rate_reason'] = 'Липсва тегло';
+        } else {
+            $shippingNet = static::lookupCourierShippingNet((string)$activeCourier['id'], $marketplaceCode, $weight, $shippingMode);
+            if ($shippingNet !== null) {
+                $p['Транспорт до кр. лиент  Netto'] = number_format($shippingNet, 2, '.', '');
+                if (!static::hasFormula('ДДС  от Транспорт до кр. лиент')) {
+                    $p['ДДС  от Транспорт до кр. лиент'] = number_format($shippingNet * 0.20, 2, '.', '');
+                }
+            } else {
+                $p['_courier_rate_missing'] = '1';
+                $ctx = static::getCourierRateContext((string)$activeCourier['id'], $marketplaceCode, $weight, $shippingMode);
+                $p['_courier_rate_reason'] = (string)($ctx['reason'] ?? ('Няма намерена тарифа за ' . $marketplaceCode . ' / ' . number_format($weight, 2, '.', '') . ' кг'));
+            }
+        }
         return static::applyFormulasToProduct($p);
     }
 
@@ -224,6 +335,9 @@ class ProductDB {
         $params = [':ean_key' => $eanKey];
 
         foreach ($p as $excelKey => $val) {
+            if (in_array($excelKey, ['Транспорт до кр. лиент  Netto','Транспорт до кр. лиент Netto','Client Shipping Netto'], true)) {
+                continue; // system-managed by courier engine
+            }
             $dbCol = static::$colMap[$excelKey] ?? null;
             if ($dbCol && $dbCol !== 'ean_key') {
                 $params[':' . $dbCol] = (string)($val ?? '');
@@ -331,12 +445,15 @@ class ProductDB {
         return compact('total', 'withAsin', 'notUploaded', 'suppliers', 'avgRez', 'posRez', 'negRez');
     }
 
-    public static function realSupplierCount(): int {
-        $file = DATA_DIR . '/suppliers.json';
-        if (!file_exists($file)) return 0;
-        $suppliers = json_decode(file_get_contents($file), true) ?? [];
-        return count(array_filter($suppliers, fn($s) => $s['active'] ?? true));
+    
+public static function realSupplierCount(): int {
+    try {
+        $db = static::db();
+        return (int)$db->query("SELECT COUNT(*) FROM suppliers WHERE active = 1")->fetchColumn();
+    } catch (Throwable $e) {
+        return 0;
     }
+}
 
     public static function distinct(string $excelField, string $filterBySupplier = ''): array {
         $dbCol = static::$colMap[$excelField] ?? null;
@@ -469,6 +586,151 @@ Throwable $e) {
 Throwable $e) {} }
         return ['exists'=>$exists,'size'=>$exists?filesize($file):0,'modified'=>$exists?date('c', filemtime($file)):null,'count'=>$count,'engine'=>'SQLite (WAL mode)'];
     }
+
+
+private static function defaultSuppliersSeed(): array {
+    $names = ['Agiva','Amperel','Argoprima','Axxon','Bebolino','Best whole sale company','Buldent','Comsed','Elle cosmetique','Fortuna','Giochi Giachi IT','Iventas','Makave','Orbico','Töpfer','Uvex','Yutika natural'];
+    $rows = [];
+    foreach ($names as $n) {
+        $rows[] = [
+            'id' => 'sup_' . substr(md5($n), 0, 8),
+            'name' => $n,
+            'email' => '',
+            'phone' => '',
+            'website' => '',
+            'notes' => '',
+            'active' => 1,
+            'currency' => 'EUR',
+            'payment_terms' => '',
+            'min_order' => 0,
+            'transport_to_us' => '0.39',
+            'created_at' => '2025-01-01 00:00:00',
+            'updated_at' => date('Y-m-d H:i:s'),
+        ];
+    }
+    return $rows;
+}
+
+private static function migrateSuppliers(): void {
+    $db = static::db();
+    $count = (int)$db->query("SELECT COUNT(*) FROM suppliers")->fetchColumn();
+    if ($count > 0) return;
+
+    $rows = [];
+    $jsonFile = DATA_DIR . '/suppliers.json';
+    if (file_exists($jsonFile)) {
+        $decoded = json_decode((string)file_get_contents($jsonFile), true);
+        if (is_array($decoded) && $decoded) {
+            foreach ($decoded as $row) {
+                $name = trim((string)($row['name'] ?? ''));
+                if ($name === '') continue;
+                $transport = trim((string)($row['transport_to_us'] ?? '0.39'));
+                if ($transport === '' || !is_numeric(str_replace(',', '.', $transport))) $transport = '0.39';
+                $rows[] = [
+                    'id' => trim((string)($row['id'] ?? '')) ?: 'sup_' . substr(md5($name), 0, 8),
+                    'name' => $name,
+                    'email' => trim((string)($row['email'] ?? '')),
+                    'phone' => trim((string)($row['phone'] ?? '')),
+                    'website' => trim((string)($row['website'] ?? '')),
+                    'notes' => trim((string)($row['notes'] ?? '')),
+                    'active' => !isset($row['active']) || (bool)$row['active'] ? 1 : 0,
+                    'currency' => trim((string)($row['currency'] ?? 'EUR')) ?: 'EUR',
+                    'payment_terms' => trim((string)($row['payment_terms'] ?? '')),
+                    'min_order' => (float)($row['min_order'] ?? 0),
+                    'transport_to_us' => number_format((float)str_replace(',', '.', $transport), 2, '.', ''),
+                    'created_at' => trim((string)($row['created_at'] ?? '')) ?: date('Y-m-d H:i:s'),
+                    'updated_at' => trim((string)($row['updated_at'] ?? '')) ?: date('Y-m-d H:i:s'),
+                ];
+            }
+        }
+    }
+    if (!$rows) $rows = static::defaultSuppliersSeed();
+
+    $stmt = $db->prepare("INSERT OR REPLACE INTO suppliers (id,name,email,phone,website,notes,active,currency,payment_terms,min_order,transport_to_us,created_at,updated_at) VALUES (:id,:name,:email,:phone,:website,:notes,:active,:currency,:payment_terms,:min_order,:transport_to_us,:created_at,:updated_at)");
+    $db->beginTransaction();
+    try {
+        foreach ($rows as $row) $stmt->execute([
+            ':id' => $row['id'], ':name' => $row['name'], ':email' => $row['email'], ':phone' => $row['phone'],
+            ':website' => $row['website'], ':notes' => $row['notes'], ':active' => $row['active'], ':currency' => $row['currency'],
+            ':payment_terms' => $row['payment_terms'], ':min_order' => $row['min_order'], ':transport_to_us' => $row['transport_to_us'],
+            ':created_at' => $row['created_at'], ':updated_at' => $row['updated_at'],
+        ]);
+        $db->commit();
+    } catch (Throwable $e) {
+        if ($db->inTransaction()) $db->rollBack();
+        Logger::error('Supplier migration failed: ' . $e->getMessage());
+    }
+}
+
+public static function getSuppliers(bool $activeOnly = false): array {
+    $db = static::db();
+    $sql = "SELECT * FROM suppliers";
+    if ($activeOnly) $sql .= " WHERE active = 1";
+    $sql .= " ORDER BY name COLLATE NOCASE";
+    $rows = $db->query($sql)->fetchAll();
+    foreach ($rows as &$row) {
+        $row['active'] = (bool)($row['active'] ?? 0);
+        $row['transport_to_us'] = number_format((float)str_replace(',', '.', (string)($row['transport_to_us'] ?? '0.39')), 2, '.', '');
+    }
+    unset($row);
+    return $rows;
+}
+
+public static function saveSupplier(array $src): array {
+    $db = static::db();
+    $id = trim((string)($src['id'] ?? ''));
+    $name = trim((string)($src['name'] ?? ''));
+    if ($name === '') return ['ok' => false, 'error' => 'Името е задължително'];
+    $transport = trim((string)($src['transport_to_us'] ?? '0.39'));
+    if ($transport === '' || !is_numeric(str_replace(',', '.', $transport))) $transport = '0.39';
+    $transport = number_format((float)str_replace(',', '.', $transport), 2, '.', '');
+
+    $exists = null;
+    if ($id !== '') {
+        $stmt = $db->prepare("SELECT * FROM suppliers WHERE id = :id");
+        $stmt->execute([':id' => $id]);
+        $exists = $stmt->fetch();
+    }
+
+    if (!$exists) {
+        $stmt = $db->prepare("SELECT id FROM suppliers WHERE lower(name) = lower(:name) AND (:id = '' OR id != :id)");
+        $stmt->execute([':name' => $name, ':id' => $id]);
+        if ($stmt->fetchColumn()) return ['ok' => false, 'error' => 'Доставчик с това име вече съществува.'];
+        $id = $id ?: 'sup_' . substr(md5($name . microtime(true)), 0, 8);
+        $stmt = $db->prepare("INSERT INTO suppliers (id,name,email,phone,website,notes,active,currency,payment_terms,min_order,transport_to_us,created_at,updated_at)
+                              VALUES (:id,:name,:email,:phone,:website,:notes,:active,:currency,:payment_terms,:min_order,:transport_to_us,:created_at,:updated_at)");
+        $created = date('Y-m-d H:i:s');
+        $stmt->execute([
+            ':id'=>$id, ':name'=>$name, ':email'=>trim((string)($src['email'] ?? '')), ':phone'=>trim((string)($src['phone'] ?? '')),
+            ':website'=>trim((string)($src['website'] ?? '')), ':notes'=>trim((string)($src['notes'] ?? '')),
+            ':active'=>(!isset($src['active']) || (bool)$src['active']) ? 1 : 0, ':currency'=>trim((string)($src['currency'] ?? 'EUR')) ?: 'EUR',
+            ':payment_terms'=>trim((string)($src['payment_terms'] ?? '')), ':min_order'=>(float)($src['min_order'] ?? 0),
+            ':transport_to_us'=>$transport, ':created_at'=>$created, ':updated_at'=>$created
+        ]);
+        return ['ok' => true, 'id' => $id, 'created' => true, 'transport_to_us' => $transport];
+    }
+
+    $stmt = $db->prepare("SELECT id FROM suppliers WHERE lower(name) = lower(:name) AND id != :id");
+    $stmt->execute([':name' => $name, ':id' => $id]);
+    if ($stmt->fetchColumn()) return ['ok' => false, 'error' => 'Доставчик с това име вече съществува.'];
+
+    $stmt = $db->prepare("UPDATE suppliers SET name=:name,email=:email,phone=:phone,website=:website,notes=:notes,active=:active,currency=:currency,payment_terms=:payment_terms,min_order=:min_order,transport_to_us=:transport_to_us,updated_at=:updated_at WHERE id=:id");
+    $stmt->execute([
+        ':id'=>$id, ':name'=>$name, ':email'=>trim((string)($src['email'] ?? '')), ':phone'=>trim((string)($src['phone'] ?? '')),
+        ':website'=>trim((string)($src['website'] ?? '')), ':notes'=>trim((string)($src['notes'] ?? '')),
+        ':active'=>(!isset($src['active']) || (bool)$src['active']) ? 1 : 0, ':currency'=>trim((string)($src['currency'] ?? ($exists['currency'] ?? 'EUR'))) ?: 'EUR',
+        ':payment_terms'=>trim((string)($src['payment_terms'] ?? ($exists['payment_terms'] ?? ''))), ':min_order'=>(float)($src['min_order'] ?? ($exists['min_order'] ?? 0)),
+        ':transport_to_us'=>$transport, ':updated_at'=>date('Y-m-d H:i:s')
+    ]);
+    return ['ok' => true, 'id' => $id, 'created' => false, 'transport_to_us' => $transport];
+}
+
+public static function deleteSupplier(string $id): bool {
+    $db = static::db();
+    $stmt = $db->prepare("DELETE FROM suppliers WHERE id = :id");
+    $stmt->execute([':id' => $id]);
+    return $stmt->rowCount() > 0;
+}
 
     public static function getAllColumnsMeta(): array {
         static::db();
@@ -925,6 +1187,8 @@ Throwable $e) {} }
             ':rounding' => $rounding,
             ':by' => $user,
         ]);
+        $db->exec("DELETE FROM formula_versions WHERE id NOT IN (SELECT id FROM formula_versions WHERE column_name = " . $db->quote($columnName) . " ORDER BY id DESC LIMIT 3) AND column_name = " . $db->quote($columnName));
+        $db->exec("DELETE FROM formula_versions WHERE id NOT IN (SELECT id FROM formula_versions ORDER BY id DESC LIMIT 10)");
     }
 
     public static function restoreFormulaVersion(int $versionId, string $user): array {
@@ -947,10 +1211,10 @@ Throwable $e) {} }
     public static function getFormulaVersions(?string $columnName = null): array {
         $db = static::db();
         if ($columnName) {
-            $stmt = $db->prepare("SELECT * FROM formula_versions WHERE column_name = :name ORDER BY id DESC LIMIT 100");
+            $stmt = $db->prepare("SELECT * FROM formula_versions WHERE column_name = :name ORDER BY id DESC LIMIT 3");
             $stmt->execute([':name' => $columnName]);
         } else {
-            $stmt = $db->query("SELECT * FROM formula_versions ORDER BY id DESC LIMIT 200");
+            $stmt = $db->query("SELECT * FROM formula_versions ORDER BY id DESC LIMIT 10");
         }
         return $stmt->fetchAll();
     }
@@ -964,6 +1228,449 @@ Throwable $e) {} }
             $stmt = $db->query("SELECT * FROM formula_history ORDER BY id DESC LIMIT 200");
         }
         return $stmt->fetchAll();
+    }
+
+
+    public static function saveArchiveSnapshot(array $products, string $label = ''): ?string {
+        $products = array_values($products);
+        if (!$products) return null;
+        $db = static::db();
+        $base = date('Y-m-d_H-i');
+        $suffix = preg_replace('/[^a-z0-9]+/i', '_', trim($label));
+        $suffix = trim((string)$suffix, '_');
+        $key = $base . ($suffix ? '_' . strtolower($suffix) : '');
+        $stmt = $db->prepare("INSERT OR REPLACE INTO product_archives (archive_key,label,count,products_json,created_at) VALUES (:k,:l,:c,:p,:dt)");
+        $stmt->execute([
+            ':k'=>$key, ':l'=>$label ?: date('d.m.Y H:i'), ':c'=>count($products), ':p'=>json_encode($products, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES), ':dt'=>date('Y-m-d H:i:s')
+        ]);
+        $db->exec("DELETE FROM product_archives WHERE id NOT IN (SELECT id FROM product_archives ORDER BY id DESC LIMIT 3)");
+        return $key;
+    }
+
+    public static function listProductArchives(): array {
+        $db = static::db();
+        return $db->query("SELECT archive_key as `key`, label, count, created_at as date FROM product_archives ORDER BY id DESC LIMIT 3")->fetchAll();
+    }
+
+    public static function getProductArchive(string $key): ?array {
+        $db = static::db();
+        $stmt = $db->prepare("SELECT * FROM product_archives WHERE archive_key=:k LIMIT 1");
+        $stmt->execute([':k'=>$key]);
+        $row = $stmt->fetch();
+        if (!$row) return null;
+        $products = json_decode((string)$row['products_json'], true);
+        if (!is_array($products)) $products = [];
+        return ['key'=>$row['archive_key'],'label'=>$row['label'],'count'=>(int)$row['count'],'date'=>$row['created_at'],'products'=>$products];
+    }
+
+    public static function restoreProductArchive(string $key): array {
+        $archive = static::getProductArchive($key);
+        if (!$archive || empty($archive['products'])) return ['ok'=>false,'error'=>'Невалиден архив'];
+        return ['ok'=>true,'products'=>$archive['products']];
+    }
+
+    public static function getAllProductsRaw(): array {
+        $db = static::db();
+        $rows = $db->query("SELECT * FROM products ORDER BY rowid ASC")->fetchAll();
+        $out = [];
+        foreach ($rows as $r) {
+            $p = [];
+            foreach (static::$colMap as $label=>$slug) {
+                $p[$label] = (string)($r[$slug] ?? '');
+            }
+            $extra = json_decode((string)($r['extra_data'] ?? '{}'), true);
+            if (is_array($extra)) foreach ($extra as $k=>$v) $p[$k] = (string)$v;
+            $p['_upload_status'] = (string)($r['upload_status'] ?? 'NOT_UPLOADED');
+            $out[] = $p;
+        }
+        return $out;
+    }
+
+    
+    private static function ensureWeightColumn(): void {
+        $db = static::db();
+        $stmt = $db->prepare("SELECT COUNT(*) FROM product_columns WHERE lower(name)=lower(:n)");
+        foreach (['Тегло', 'Тегло (кг)'] as $name) {
+            $stmt->execute([':n' => $name]);
+            if ((int)$stmt->fetchColumn() > 0) return;
+        }
+        $pos = (int)$db->query("SELECT COALESCE(MAX(position),0)+1 FROM product_columns")->fetchColumn();
+        $slug = static::slugify('Тегло (кг)');
+        $ins = $db->prepare("INSERT OR IGNORE INTO product_columns (name, slug, data_type, source, is_formula, position, created_by) VALUES ('Тегло (кг)', :slug, 'number', 'system', 0, :pos, 'system')");
+        $ins->execute([':slug' => $slug, ':pos' => $pos]);
+    }
+
+
+    private static function ensureShippingModeColumn(): void {
+        $db = static::db();
+        $stmt = $db->prepare("SELECT COUNT(*) FROM product_columns WHERE lower(name)=lower(:n)");
+        foreach (['Режим доставка', 'Shipping Mode'] as $name) {
+            $stmt->execute([':n' => $name]);
+            if ((int)$stmt->fetchColumn() > 0) return;
+        }
+        $pos = (int)$db->query("SELECT COALESCE(MAX(position),0)+1 FROM product_columns")->fetchColumn();
+        $slug = static::slugify('Режим доставка');
+        $ins = $db->prepare("INSERT OR IGNORE INTO product_columns (name, slug, data_type, source, is_formula, position, created_by) VALUES ('Режим доставка', :slug, 'text', 'system', 0, :pos, 'system')");
+        $ins->execute([':slug' => $slug, ':pos' => $pos]);
+    }
+
+    private static function ensureCourierState(): void {
+        $db = static::db();
+        $activeCount = (int)$db->query("SELECT COUNT(*) FROM couriers WHERE active=1")->fetchColumn();
+        if ($activeCount === 1) return;
+
+        $a1 = $db->prepare("SELECT id FROM couriers WHERE lower(name)=lower(:n) LIMIT 1");
+        $a1->execute([':n' => 'A1 VARNA']);
+        $a1Id = $a1->fetchColumn();
+
+        if ($a1Id) {
+            $db->beginTransaction();
+            try {
+                $db->exec("UPDATE couriers SET active=0");
+                $stmt = $db->prepare("UPDATE couriers SET active=1, updated_at=:dt WHERE id=:id");
+                $stmt->execute([':id' => $a1Id, ':dt' => date('Y-m-d H:i:s')]);
+                $db->commit();
+            } catch (Throwable $e) {
+                if ($db->inTransaction()) $db->rollBack();
+            }
+            return;
+        }
+
+        if ($activeCount === 0) {
+            $first = $db->query("SELECT id FROM couriers ORDER BY created_at ASC, name COLLATE NOCASE ASC LIMIT 1")->fetchColumn();
+            if ($first) {
+                $stmt = $db->prepare("UPDATE couriers SET active=1, updated_at=:dt WHERE id=:id");
+                $stmt->execute([':id' => $first, ':dt' => date('Y-m-d H:i:s')]);
+            }
+        }
+    }
+
+    public static function seedMarketplaces(): void {
+        $db = static::db();
+        $count = (int)$db->query("SELECT COUNT(*) FROM marketplaces")->fetchColumn();
+        if ($count > 0) return;
+        $rows = [
+            ['DE','Германия','Германия',0.19,1,1,1],
+            ['FR','Франция','Франция',0.20,1,0,2],
+            ['IT','Италия','Италия',0.22,1,0,3],
+            ['ES','Испания','Испания',0.21,1,0,4],
+            ['NL','Нидерландия','Нидерландия',0.21,1,0,5],
+            ['BE','Белгия','Белгия',0.21,1,0,6],
+            ['PL','Полша','Полша',0.23,1,0,7],
+            ['CZ','Чехия','Чехия',0.21,1,0,8],
+            ['SE','Швеция','Швеция',0.25,1,0,9],
+        ];
+        $stmt = $db->prepare("INSERT INTO marketplaces (code,name,country_label,vat_rate,is_active,is_default,position,updated_at) VALUES (?,?,?,?,?,?,?,datetime('now'))");
+        foreach ($rows as $r) $stmt->execute($r);
+    }
+
+    public static function getMarketplaces(): array {
+        $db = static::db();
+        return $db->query("SELECT * FROM marketplaces WHERE is_active=1 ORDER BY is_default DESC, position ASC, code ASC")->fetchAll();
+    }
+
+    public static function getDefaultMarketplaceCode(): string {
+        $db = static::db();
+        $code = $db->query("SELECT code FROM marketplaces WHERE is_default=1 LIMIT 1")->fetchColumn();
+        if ($code) return (string)$code;
+        $first = $db->query("SELECT code FROM marketplaces WHERE is_active=1 ORDER BY position ASC, code ASC LIMIT 1")->fetchColumn();
+        return $first ? (string)$first : 'DE';
+    }
+
+    public static function getMarketplaceCodeFromRequest(): string {
+        $code = strtoupper(trim((string)($_GET['mp'] ?? $_POST['mp'] ?? '')));
+        if ($code === '') $code = static::getDefaultMarketplaceCode();
+        $valid = array_column(static::getMarketplaces(), 'code');
+        return in_array($code, $valid, true) ? $code : static::getDefaultMarketplaceCode();
+    }
+
+    public static function getActiveCourier(): ?array {
+        $db = static::db();
+        $row = $db->query("SELECT * FROM couriers WHERE active=1 ORDER BY updated_at DESC, name COLLATE NOCASE LIMIT 1")->fetch();
+        return $row ?: null;
+    }
+
+    public static function setActiveCourier(string $id): array {
+        $db = static::db();
+        $cur = static::getCourier($id);
+        if (!$cur) return ['ok'=>false,'error'=>'Невалиден куриер'];
+        $db->beginTransaction();
+        try {
+            $db->exec("UPDATE couriers SET active=0");
+            $stmt = $db->prepare("UPDATE couriers SET active=1, updated_at=:dt WHERE id=:id");
+            $stmt->execute([':id'=>$id, ':dt'=>date('Y-m-d H:i:s')]);
+            $db->commit();
+            return ['ok'=>true];
+        } catch (Throwable $e) {
+            if ($db->inTransaction()) $db->rollBack();
+            return ['ok'=>false,'error'=>$e->getMessage()];
+        }
+    }
+
+    private static function productWeightKg(array $p): ?float {
+        foreach (['Тегло (кг)','Тегло','Weight','Weight (kg)'] as $key) {
+            if (!isset($p[$key])) continue;
+            $raw = trim((string)$p[$key]);
+            if ($raw === '') continue;
+            $num = (float)str_replace(',', '.', preg_replace('/[^0-9,\.]+/u', '', $raw));
+            if ($num > 0) return $num;
+        }
+        return null;
+    }
+
+    private static function productShippingMode(array $p): string {
+        $settings = Settings::get();
+        $global = (string)($settings['courier_shipping_mode'] ?? 'untracked');
+        $global = in_array($global, ['untracked','tracked'], true) ? $global : 'untracked';
+        foreach (['Режим доставка', 'Shipping Mode'] as $key) {
+            if (!isset($p[$key])) continue;
+            $raw = mb_strtolower(trim((string)$p[$key]));
+            if ($raw === '') continue;
+            if (str_contains($raw, 'с прослед') || str_contains($raw, 'tracked')) return 'tracked';
+            if (str_contains($raw, 'без прослед') || str_contains($raw, 'untracked')) return 'untracked';
+        }
+        return $global;
+    }
+
+
+    public static function getCourierRateContext(?string $courierId, string $marketplaceCode, ?float $weight, string $shippingMode='untracked'): array {
+        $ctx = ['match'=>false,'reason'=>'','country_label'=>'','max_weight'=>None];
+        if (!$courierId) { $ctx['reason']='Няма активен куриер'; return $ctx; }
+        if ($weight === null || $weight <= 0) { $ctx['reason']='Липсва тегло'; return $ctx; }
+        $db = static::db();
+        $m = null;
+        foreach (static::getMarketplaces() as $mk) {
+            if (strtoupper((string)$mk['code']) === strtoupper($marketplaceCode)) { $m = $mk; break; }
+        }
+        $countryLabel = $m['country_label'] ?? 'Германия';
+        $ctx['country_label'] = $countryLabel;
+
+        $stmt = $db->prepare("SELECT MAX(weight_to) FROM courier_rate_rows WHERE courier_id=:id");
+        $stmt->execute([':id'=>$courierId]);
+        $maxW = $stmt->fetchColumn();
+        $ctx['max_weight'] = $maxW !== false && $maxW !== null ? (float)$maxW : null;
+
+        $stmt = $db->prepare("SELECT * FROM courier_rate_rows WHERE courier_id=:id AND weight_from <= :w AND weight_to >= :w ORDER BY weight_from DESC, weight_to ASC LIMIT 1");
+        $stmt->execute([':id'=>$courierId, ':w'=>$weight]);
+        $row = $stmt->fetch();
+        if (!$row) {
+            if ($ctx['max_weight'] !== null && $weight > (float)$ctx['max_weight']) {
+                $ctx['reason'] = 'Теглото ' . number_format($weight, 2, '.', '') . ' кг е над максимума ' . number_format((float)$ctx['max_weight'], 2, '.', '') . ' кг за ' . $countryLabel;
+            } else {
+                $ctx['reason'] = 'Няма ред за ' . $countryLabel . ' / ' . number_format($weight, 2, '.', '') . ' кг';
+            }
+            return $ctx;
+        }
+        $countries = json_decode((string)($row['countries_json'] ?? '{}'), true);
+        $entry = (is_array($countries) && array_key_exists($countryLabel, $countries)) ? $countries[$countryLabel] : null;
+        if ($entry === null) {
+            $ctx['reason'] = 'Няма тарифа за държавата ' . $countryLabel;
+            return $ctx;
+        }
+        $val = null;
+        if (is_array($entry)) {
+            $key = $shippingMode === 'tracked' ? 'tracked_net' : 'untracked_net';
+            $raw = trim((string)($entry[$key] ?? ''));
+            if ($raw !== '') $val = (float)str_replace(',', '.', $raw);
+        } else {
+            $raw = trim((string)$entry);
+            if ($raw !== '') $val = (float)str_replace(',', '.', $raw);
+        }
+        if ($val === null) {
+            $ctx['reason'] = 'Няма ' . ($shippingMode === 'tracked' ? 'цена с проследяване' : 'цена без проследяване') . ' за ' . $countryLabel;
+            return $ctx;
+        }
+        $ctx['match'] = true;
+        return $ctx;
+    }
+
+    public static function lookupCourierShippingNet(?string $courierId, string $marketplaceCode, ?float $weight, string $shippingMode='untracked'): ?float {
+        if (!$courierId || $weight === null || $weight <= 0) return null;
+        $db = static::db();
+        $stmt = $db->prepare("SELECT * FROM courier_rate_rows WHERE courier_id=:id AND weight_from <= :w AND weight_to >= :w ORDER BY weight_from DESC, weight_to ASC LIMIT 1");
+        $stmt->execute([':id'=>$courierId, ':w'=>$weight]);
+        $row = $stmt->fetch();
+        if (!$row) return null;
+        $m = null;
+        foreach (static::getMarketplaces() as $mk) {
+            if (strtoupper((string)$mk['code']) === strtoupper($marketplaceCode)) { $m = $mk; break; }
+        }
+        $countryLabel = $m['country_label'] ?? 'Германия';
+        $countries = json_decode((string)($row['countries_json'] ?? '{}'), true);
+        $val = null;
+        if (is_array($countries) && array_key_exists($countryLabel, $countries)) {
+            $entry = $countries[$countryLabel];
+            if (is_array($entry)) {
+                $key = $shippingMode === 'tracked' ? 'tracked_net' : 'untracked_net';
+                $raw = trim((string)($entry[$key] ?? ''));
+                if ($raw !== '') $val = (float)str_replace(',', '.', $raw);
+            } else {
+                $raw = trim((string)$entry);
+                if ($raw !== '') $val = (float)str_replace(',', '.', $raw);
+            }
+        }
+        if ($val === null) $val = (float)($row['netto'] ?? 0);
+        return $val >= 0 ? $val : null;
+    }
+
+public static function saveCourier(array $src): array {
+        $db = static::db();
+        $id = trim((string)($src['id'] ?? '')) ?: 'cour_' . substr(md5(microtime(true) . ($src['name'] ?? '')),0,8);
+        $name = trim((string)($src['name'] ?? ''));
+        if ($name === '') return ['ok'=>false,'error'=>'Името е задължително'];
+
+        $stmt = $db->prepare("SELECT id FROM couriers WHERE lower(name)=lower(:n) AND id != :id");
+        $stmt->execute([':n'=>$name,':id'=>$id]);
+        if ($stmt->fetchColumn()) return ['ok'=>false,'error'=>'Куриер с това име вече съществува'];
+
+        $hasAny = (int)$db->query("SELECT COUNT(*) FROM couriers")->fetchColumn() > 0;
+        $requestedActive = isset($src['active']) ? ((bool)$src['active'] ? 1 : 0) : 0;
+        $shouldBeActive = $requestedActive;
+        if (!$hasAny) $shouldBeActive = 1;
+        if (mb_strtolower($name) === mb_strtolower('A1 VARNA') && ((int)$db->query("SELECT COUNT(*) FROM couriers WHERE active=1")->fetchColumn() === 0)) {
+            $shouldBeActive = 1;
+        }
+
+        $dt=date('Y-m-d H:i:s');
+        $db->beginTransaction();
+        try {
+            if ($shouldBeActive) {
+                $db->exec("UPDATE couriers SET active=0");
+            }
+            $stmt = $db->prepare("INSERT INTO couriers (id,name,active,created_at,updated_at) VALUES (:id,:name,:active,:dt,:dt) ON CONFLICT(id) DO UPDATE SET name=excluded.name, active=excluded.active, updated_at=excluded.updated_at");
+            $stmt->execute([':id'=>$id,':name'=>$name,':active'=>$shouldBeActive?1:0,':dt'=>$dt]);
+            $db->commit();
+            return ['ok'=>true,'id'=>$id];
+        } catch (Throwable $e) {
+            if ($db->inTransaction()) $db->rollBack();
+            return ['ok'=>false,'error'=>$e->getMessage()];
+        }
+    }
+
+    public static function getCouriers(): array {
+        $db = static::db();
+        $rows = $db->query("SELECT c.*, (SELECT COUNT(*) FROM courier_rate_rows r WHERE r.courier_id=c.id) as rate_count FROM couriers c ORDER BY name COLLATE NOCASE")->fetchAll();
+        foreach($rows as &$r){$r['active']=(bool)($r['active']??0);} unset($r); return $rows;
+    }
+
+    public static function getCourier(string $id): ?array {
+        $db = static::db();
+        $stmt=$db->prepare("SELECT * FROM couriers WHERE id=:id"); $stmt->execute([':id'=>$id]); $row=$stmt->fetch(); return $row?:null;
+    }
+
+    public static function deleteCourierRates(string $courierId): bool {
+        $db = static::db();
+        $stmt=$db->prepare("DELETE FROM courier_rate_rows WHERE courier_id=:id");
+        $stmt->execute([':id'=>$courierId]);
+        return true;
+    }
+
+    public static function importCourierRates(string $courierId, array $rows, string $originalFilename = '', string $mimeType = 'application/octet-stream', string $fileBlob = ''): array {
+        $db = static::db();
+        $db->beginTransaction();
+        try {
+            $db->prepare("DELETE FROM courier_rate_rows WHERE courier_id=:id")->execute([':id'=>$courierId]);
+            $stmt=$db->prepare("INSERT INTO courier_rate_rows (courier_id,weight_from,weight_to,netto,brutto,countries_json,created_at) VALUES (:cid,:wf,:wt,:n,:b,:j,:dt)");
+            $dt=date('Y-m-d H:i:s');
+            foreach($rows as $r){
+                $countries = $r['_countries_mode'] ?? $r;
+                unset($countries['Тегло от'],$countries['Тегло до'],$countries['Стойност нетто'],$countries['Стойност бруто'],$countries['_countries_mode']);
+                $stmt->execute([
+                    ':cid'=>$courierId,
+                    ':wf'=>(float)str_replace(',','.',$r['Тегло от'] ?? 0),
+                    ':wt'=>(float)str_replace(',','.',$r['Тегло до'] ?? 0),
+                    ':n'=>(float)str_replace(',','.',$r['Стойност нетто'] ?? 0),
+                    ':b'=>(float)str_replace(',','.',$r['Стойност бруто'] ?? 0),
+                    ':j'=>json_encode($countries, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES),
+                    ':dt'=>$dt
+                ]);
+            }
+
+            if ($fileBlob !== '') {
+                $ins = $db->prepare("INSERT INTO courier_rate_imports (courier_id, original_filename, mime_type, file_blob, row_count, imported_by, created_at) VALUES (:cid,:fn,:mime,:blob,:cnt,:by,:dt)");
+                $ins->bindValue(':cid', $courierId);
+                $ins->bindValue(':fn', $originalFilename);
+                $ins->bindValue(':mime', $mimeType);
+                $ins->bindValue(':blob', $fileBlob, PDO::PARAM_LOB);
+                $ins->bindValue(':cnt', count($rows), PDO::PARAM_INT);
+                $ins->bindValue(':by', $_SESSION['user'] ?? '');
+                $ins->bindValue(':dt', $dt);
+                $ins->execute();
+
+                $trim = $db->prepare("DELETE FROM courier_rate_imports WHERE id NOT IN (
+                    SELECT id FROM courier_rate_imports WHERE courier_id=:cid ORDER BY created_at DESC, id DESC LIMIT 10
+                ) AND courier_id=:cid");
+                $trim->execute([':cid'=>$courierId]);
+            }
+
+            $db->commit();
+            return ['ok'=>true,'count'=>count($rows)];
+        } catch (Throwable $e) {
+            if($db->inTransaction()) $db->rollBack();
+            return ['ok'=>false,'error'=>$e->getMessage()];
+        }
+    }
+
+    public static function getCourierRateImports(string $courierId): array {
+        $db = static::db();
+        $stmt = $db->prepare("SELECT id, courier_id, original_filename, mime_type, row_count, imported_by, created_at FROM courier_rate_imports WHERE courier_id=:id ORDER BY created_at DESC, id DESC LIMIT 10");
+        $stmt->execute([':id'=>$courierId]);
+        return $stmt->fetchAll() ?: [];
+    }
+
+
+    public static function deleteCourier(string $courierId): array {
+        $db = static::db();
+        $cur = static::getCourier($courierId);
+        if (!$cur) return ['ok'=>false,'error'=>'Невалиден куриер'];
+        $isActive = !empty($cur['active']);
+        $db->beginTransaction();
+        try {
+            $db->prepare("DELETE FROM courier_rate_rows WHERE courier_id=:id")->execute([':id'=>$courierId]);
+            $db->prepare("DELETE FROM courier_rate_imports WHERE courier_id=:id")->execute([':id'=>$courierId]);
+            $db->prepare("DELETE FROM couriers WHERE id=:id")->execute([':id'=>$courierId]);
+            if ($isActive) {
+                $next = $db->query("SELECT id FROM couriers ORDER BY updated_at DESC, name COLLATE NOCASE LIMIT 1")->fetchColumn();
+                if ($next) {
+                    $db->exec("UPDATE couriers SET active=0");
+                    $stmt = $db->prepare("UPDATE couriers SET active=1, updated_at=:dt WHERE id=:id");
+                    $stmt->execute([':id'=>$next, ':dt'=>date('Y-m-d H:i:s')]);
+                }
+            }
+            $db->commit();
+            return ['ok'=>true];
+        } catch (Throwable $e) {
+            if ($db->inTransaction()) $db->rollBack();
+            return ['ok'=>false,'error'=>$e->getMessage()];
+        }
+    }
+
+
+    public static function deleteCourierRateImport(int $id, string $courierId): array {
+        $db = static::db();
+        $stmt = $db->prepare("DELETE FROM courier_rate_imports WHERE id=:id AND courier_id=:cid");
+        $stmt->execute([':id'=>$id, ':cid'=>$courierId]);
+        return ['ok' => $stmt->rowCount() > 0];
+    }
+
+    public static function getCourierRateImport(int $id): ?array {
+        $db = static::db();
+        $stmt = $db->prepare("SELECT * FROM courier_rate_imports WHERE id=:id LIMIT 1");
+        $stmt->execute([':id'=>$id]);
+        $row = $stmt->fetch();
+        return $row ?: null;
+    }
+
+    public static function getCourierRateRows(string $courierId): array {
+        $db = static::db();
+        $stmt=$db->prepare("SELECT * FROM courier_rate_rows WHERE courier_id=:id ORDER BY weight_from, weight_to"); $stmt->execute([':id'=>$courierId]);
+        $rows=[];
+        foreach($stmt->fetchAll() as $r){
+            $base=['Тегло от'=>$r['weight_from'],'Тегло до'=>$r['weight_to'],'Стойност нетто'=>$r['netto'],'Стойност бруто'=>$r['brutto']];
+            $countries=json_decode((string)$r['countries_json'],true); if(!is_array($countries)) $countries=[];
+            $rows[]=$base+$countries;
+        }
+        return $rows;
     }
 
     private static function invalidateFormulaCache(): void { static::$formulaCache = null; }

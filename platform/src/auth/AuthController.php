@@ -76,12 +76,7 @@ class AuthController {
     // ── Login ────────────────────────────────────────────────
     public function loginPage() {
         if (Auth::isLoggedIn()) View::redirect('/dashboard');
-        $supplierCount = 0;
-        $suppliersFile = DATA_DIR . '/suppliers.json';
-        if (file_exists($suppliersFile)) {
-            $suppliers = json_decode(file_get_contents($suppliersFile), true) ?? [];
-            $supplierCount = count(array_filter($suppliers, fn($s) => $s['active'] ?? true));
-        }
+        $supplierCount = ProductDB::realSupplierCount();
         View::render('auth/login', ['error' => null, 'supplierCount' => $supplierCount]);
     }
 

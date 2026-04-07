@@ -51,6 +51,7 @@ class Settings {
             'drive_folder_id' => env('GOOGLE_DRIVE_FOLDER_ID', ''),
             'formulas'        => [],
             'formulas_locked' => false,
+            'courier_shipping_mode' => 'untracked',
         ];
     }
 }
